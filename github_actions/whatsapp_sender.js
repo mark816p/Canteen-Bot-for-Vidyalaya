@@ -7,7 +7,7 @@ const mode = process.argv[2]; // 'link', 'test', or 'send'
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process']
     }
 });
 
@@ -62,4 +62,8 @@ client.on('auth_failure', msg => {
     process.exit(1);
 });
 
-client.initialize();
+console.log('Initializing WhatsApp Client...');
+client.initialize().then(() => console.log('Client initialization promise resolved.')).catch(err => {
+    console.error('Error during initialization:', err);
+    process.exit(1);
+});
