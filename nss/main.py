@@ -357,9 +357,12 @@ def get_record(conn: sqlite3.Connection, target_date: str) -> tuple[str, str] | 
 
 
 def build_message(record: tuple[str, str]) -> str:
+    date_obj = datetime.strptime(record[0], "%Y-%m-%d")
+    day_name = date_obj.strftime("%A")
     return f"""*Navrachana Sama Canteen Bot*
 
 *Date:* {record[0]}
+*Day:* {day_name}
 *Food:*
 {record[1]}"""
 
