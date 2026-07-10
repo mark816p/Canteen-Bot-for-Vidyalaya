@@ -39,6 +39,6 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add github_actions/.baileys_auth/
+          git add -f github_actions/.baileys_auth/
           git commit -m "Update WhatsApp Session keys (Baileys)" || echo "No changes to commit"
           git push
