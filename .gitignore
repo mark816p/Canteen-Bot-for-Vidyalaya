@@ -19,3 +19,11 @@ autorun.log
 __pycache__/
 *.py[cod]
 *$py.class
+
+# WhatsApp session auth (committed explicitly by Link workflow only)
+github_actions/.baileys_auth/
+github_actions/.wwebjs_auth/
+
+# Node modules
+github_actions/node_modules/
+
