@@ -28,32 +28,26 @@ jobs:
           VIDYALAYA_PASSWORD: ${{ secrets.VIDYALAYA_PASSWORD }}
         run: python github_actions/scraper.py
 
-      - name: Send WhatsApp Messages via Green API (Both Groups)
-        env:
-          GREEN_API_ID: ${{ secrets.GREEN_API_ID }}
-          GREEN_API_TOKEN: ${{ secrets.GREEN_API_TOKEN }}
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install Go Dependencies
+        working-directory: github_actions/wa_sender
         run: |
-          if [ ! -f github_actions/message_to_send.txt ]; then
+          go mod tidy
+
+      - name: Send WhatsApp Message (Both Groups)
+        working-directory: github_actions
+        env:
+          WHATSAPP_SESSION_DB: ${{ secrets.WHATSAPP_SESSION_DB }}
+        run: |
+          if [ ! -f message_to_send.txt ]; then
             echo "No message to send (holiday or no menu found). Skipping."
             exit 0
           fi
-
-          MESSAGE=$(cat github_actions/message_to_send.txt)
-          JSON_MESSAGE=$(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-
-          send_message() {
-            local CHAT_ID=$1
-            local LABEL=$2
-            echo "Sending to $LABEL ($CHAT_ID)..."
-            RESPONSE=$(curl -s -X POST \
-              "https://api.green-api.com/waInstance${GREEN_API_ID}/sendMessage/${GREEN_API_TOKEN}" \
-              -H 'Content-Type: application/json' \
-              -d "{\"chatId\": \"$CHAT_ID\", \"message\": $JSON_MESSAGE}")
-            echo "Response: $RESPONSE"
-            sleep 3
-          }
-
-          send_message "120363295006728236@g.us" "Navrachana Sama Canteen"
-          send_message "120363370008112217@g.us" "Savya"
-
-          echo "All messages sent successfully."
+          
+          # Run the custom Go WhatsApp Sender we built
+          cd wa_sender
+          go run main.go production
