@@ -1,0 +1,10 @@
+{
+  "name": "canteen-bot-whatsapp",
+  "version": "1.0.0",
+  "description": "WhatsApp sender for GitHub Actions",
+  "main": "whatsapp_sender.js",
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

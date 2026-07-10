@@ -1,0 +1,36 @@
+name: Link WhatsApp
+
+on:
+  workflow_dispatch:
+
+jobs:
+  link-whatsapp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: github_actions
+        run: npm install
+
+      - name: Generate QR Code
+        working-directory: github_actions
+        run: |
+          echo "Please scan the QR code that appears below using WhatsApp Linked Devices:"
+          node whatsapp_sender.js link
+
+      - name: Commit Saved Session
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add github_actions/.wwebjs_auth/
+          git commit -m "Update WhatsApp Session keys" || echo "No changes to commit"
+          git push

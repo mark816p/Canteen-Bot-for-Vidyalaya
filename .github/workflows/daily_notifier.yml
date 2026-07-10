@@ -1,0 +1,47 @@
+name: Daily Canteen Notifier (Both Groups)
+
+on:
+  schedule:
+    # 13:30 UTC is 7:00 PM IST
+    - cron: '30 13 * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Node dependencies
+        working-directory: github_actions
+        run: npm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Python dependencies
+        working-directory: github_actions
+        run: pip install -r requirements.txt
+
+      - name: Run Scraper
+        env:
+          VIDYALAYA_USERNAME: ${{ secrets.VIDYALAYA_USERNAME }}
+          VIDYALAYA_PASSWORD: ${{ secrets.VIDYALAYA_PASSWORD }}
+        run: python github_actions/scraper.py
+
+      - name: Send WhatsApp Message
+        working-directory: github_actions
+        run: |
+          if [ -f message_to_send.txt ]; then
+            node whatsapp_sender.js send
+          else
+            echo "No message to send (could be a holiday or no menu)."
+          fi
