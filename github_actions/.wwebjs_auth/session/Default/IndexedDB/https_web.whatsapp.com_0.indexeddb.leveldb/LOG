@@ -1,5 +1,0 @@
-2026/07/10-14:56:32.268 7fc Creating DB /home/runner/work/Canteen-Bot-for-Vidyalaya/Canteen-Bot-for-Vidyalaya/github_actions/.wwebjs_auth/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb since it was missing.
-2026/07/10-14:56:32.276 7fc Reusing MANIFEST /home/runner/work/Canteen-Bot-for-Vidyalaya/Canteen-Bot-for-Vidyalaya/github_actions/.wwebjs_auth/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2026/07/10-14:56:48.850 800 Level-0 table #5: started
-2026/07/10-14:56:48.889 800 Level-0 table #5: 1090667 bytes OK
-2026/07/10-14:56:48.890 800 Delete type=0 #3
