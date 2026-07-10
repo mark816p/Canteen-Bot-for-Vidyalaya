@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -38,7 +38,7 @@ func main() {
 
 	// Open the whatsmeow store
 	dbLog := waLog.Stdout("Database", "ERROR", true)
-	container, err := sqlstore.New(context.Background(), "sqlite", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), dbLog)
+	container, err := sqlstore.New(context.Background(), "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), dbLog)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[WA Sender] Failed to open DB: %v\n", err)
 		os.Exit(1)
@@ -131,5 +131,5 @@ func main() {
 
 // openSQLiteDB is a helper to check if the DB has the required whatsmeow tables
 func openSQLiteDB(path string) (*sql.DB, error) {
-	return sql.Open("sqlite", fmt.Sprintf("file:%s?_foreign_keys=on", path))
+	return sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", path))
 }
