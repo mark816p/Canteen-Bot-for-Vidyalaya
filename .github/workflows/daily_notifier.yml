@@ -41,12 +41,16 @@ jobs:
       - name: Send WhatsApp Message (Both Groups)
         working-directory: github_actions
         env:
-          WHATSAPP_SESSION_DB: ${{ secrets.WHATSAPP_SESSION_DB }}
+          PART1: ${{ secrets.WHATSAPP_SESSION_PART1 }}
+          PART2: ${{ secrets.WHATSAPP_SESSION_PART2 }}
         run: |
           if [ ! -f message_to_send.txt ]; then
             echo "No message to send (holiday or no menu found). Skipping."
             exit 0
           fi
+          
+          # Reconstruct the session database
+          echo "$PART1$PART2" | base64 -d | gzip -d > /tmp/whatsapp_session.db
           
           # Run the custom Go WhatsApp Sender we built
           cd wa_sender
