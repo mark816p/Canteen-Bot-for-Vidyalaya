@@ -63,4 +63,4 @@ jobs:
           
           # Run the custom Go WhatsApp Sender we built
           cd wa_sender
-          go run main.go production
+          CGO_ENABLED=1 go run main.go production
