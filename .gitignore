@@ -1,0 +1,21 @@
+# Python Virtual Environment
+nss/venv/
+venv/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+nss/canteen.db
+
+# Environment variables
+.env
+
+# Logs
+*.log
+autorun.log
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
