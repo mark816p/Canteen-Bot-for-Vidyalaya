@@ -2,7 +2,7 @@ name: Daily Canteen Notifier (Both Groups)
 
 on:
   schedule:
-    # 13:30 UTC is 7:00 PM IST
+    # 13:30 UTC = 7:00 PM IST
     - cron: '30 13 * * *'
   workflow_dispatch:
 
@@ -12,15 +12,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-
-      - name: Install Node dependencies
-        working-directory: github_actions
-        run: npm install
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -37,11 +28,32 @@ jobs:
           VIDYALAYA_PASSWORD: ${{ secrets.VIDYALAYA_PASSWORD }}
         run: python github_actions/scraper.py
 
-      - name: Send WhatsApp Message
-        working-directory: github_actions
+      - name: Send WhatsApp Messages via Green API (Both Groups)
+        env:
+          GREEN_API_ID: ${{ secrets.GREEN_API_ID }}
+          GREEN_API_TOKEN: ${{ secrets.GREEN_API_TOKEN }}
         run: |
-          if [ -f message_to_send.txt ]; then
-            node whatsapp_sender.js send
-          else
-            echo "No message to send (could be a holiday or no menu)."
+          if [ ! -f github_actions/message_to_send.txt ]; then
+            echo "No message to send (holiday or no menu found). Skipping."
+            exit 0
           fi
+
+          MESSAGE=$(cat github_actions/message_to_send.txt)
+          JSON_MESSAGE=$(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+
+          send_message() {
+            local CHAT_ID=$1
+            local LABEL=$2
+            echo "Sending to $LABEL ($CHAT_ID)..."
+            RESPONSE=$(curl -s -X POST \
+              "https://api.green-api.com/waInstance${GREEN_API_ID}/sendMessage/${GREEN_API_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              -d "{\"chatId\": \"$CHAT_ID\", \"message\": $JSON_MESSAGE}")
+            echo "Response: $RESPONSE"
+            sleep 3
+          }
+
+          send_message "120363295006728236@g.us" "Navrachana Sama Canteen"
+          send_message "120363370008112217@g.us" "Savya"
+
+          echo "All messages sent successfully."
