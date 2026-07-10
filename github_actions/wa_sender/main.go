@@ -30,25 +30,12 @@ func main() {
 
 	log(fmt.Sprintf("Starting in '%s' mode...", mode))
 
-	// Decode session DB from environment variable
-	sessionB64 := os.Getenv("WHATSAPP_SESSION_DB")
-	if sessionB64 == "" {
-		fmt.Fprintln(os.Stderr, "[WA Sender] WHATSAPP_SESSION_DB environment variable is not set.")
-		os.Exit(1)
-	}
-
-	sessionDB, err := base64.StdEncoding.DecodeString(sessionB64)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[WA Sender] Failed to decode session DB: %v\n", err)
-		os.Exit(1)
-	}
-
 	dbPath := "/tmp/whatsapp_session.db"
-	if err := os.WriteFile(dbPath, sessionDB, 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "[WA Sender] Failed to write session DB: %v\n", err)
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "[WA Sender] Session DB not found at %s. Ensure GitHub Actions stitched the secrets correctly.\n", dbPath)
 		os.Exit(1)
 	}
-	log(fmt.Sprintf("Session DB written to %s (%d bytes)", dbPath, len(sessionDB)))
+	log(fmt.Sprintf("Using Session DB at %s", dbPath))
 
 	// Open the whatsmeow store
 	dbLog := waLog.Stdout("Database", "ERROR", true)
