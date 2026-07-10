@@ -46,8 +46,17 @@ jobs:
             exit 0
           fi
           
-          # Reconstruct the session database
-          echo "$PART1$PART2" | base64 -d | gzip -d > /tmp/whatsapp_session.db
+          # Reconstruct the session database using Python for robustness
+          python -c "
+          import os, base64, gzip, sys
+          try:
+              b = base64.b64decode(os.environ['PART1'] + os.environ['PART2'])
+              with open('/tmp/whatsapp_session.db', 'wb') as f:
+                  f.write(gzip.decompress(b))
+          except Exception as e:
+              print('Extraction Failed:', e)
+              sys.exit(1)
+          "
           
           # Run the custom Go WhatsApp Sender we built
           cd wa_sender

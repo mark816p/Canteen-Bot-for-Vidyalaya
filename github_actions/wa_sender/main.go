@@ -74,10 +74,13 @@ func main() {
 	log("Connected successfully!")
 
 	// Read the message to send
-	msgFile := "github_actions/message_to_send.txt"
+	msgFile := "../message_to_send.txt"
 	if _, err := os.Stat(msgFile); os.IsNotExist(err) {
-		log("No message_to_send.txt found. Nothing to send (holiday or no menu).")
-		os.Exit(0)
+		msgFile = "github_actions/message_to_send.txt"
+		if _, err := os.Stat(msgFile); os.IsNotExist(err) {
+			log("No message_to_send.txt found. Nothing to send (holiday or no menu).")
+			os.Exit(0)
+		}
 	}
 
 	msgBytes, err := os.ReadFile(msgFile)
