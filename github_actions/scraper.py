@@ -229,9 +229,9 @@ def main():
         log(f"No menu was found for {target_date}. Available scraped dates: {available}")
         sys.exit(0) # Do not fail the action if there is no menu for tomorrow
         
-    if record["food"].strip().casefold() == "holiday":
-        log(f"{target_date} is marked as HOLIDAY; no message created.")
-        sys.exit(0)
+    if record["food"].strip().casefold() == "holiday" or "holiday" in record["food"].casefold():
+        log(f"{target_date} is marked as HOLIDAY.")
+        # Instead of skipping, we just write the holiday message!
 
     msg = build_message(record)
     with open("github_actions/message_to_send.txt", "w", encoding="utf-8") as f:
