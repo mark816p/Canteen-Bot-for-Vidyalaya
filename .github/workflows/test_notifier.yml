@@ -10,15 +10,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-
-      - name: Install Node dependencies
-        working-directory: github_actions
-        run: npm install
-
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -34,11 +25,21 @@ jobs:
           VIDYALAYA_PASSWORD: ${{ secrets.VIDYALAYA_PASSWORD }}
         run: python github_actions/scraper.py
 
-      - name: Send WhatsApp Message (Test Mode)
-        working-directory: github_actions
+      - name: Send WhatsApp Message via Green API (Test - Savya Only)
+        env:
+          GREEN_API_ID: ${{ secrets.GREEN_API_ID }}
+          GREEN_API_TOKEN: ${{ secrets.GREEN_API_TOKEN }}
         run: |
-          if [ -f message_to_send.txt ]; then
-            node whatsapp_sender.js test
-          else
-            echo "No message to send (could be a holiday or no menu)."
+          if [ ! -f github_actions/message_to_send.txt ]; then
+            echo "No message to send (holiday or no menu found). Skipping."
+            exit 0
           fi
+
+          MESSAGE=$(cat github_actions/message_to_send.txt)
+
+          echo "Sending to Savya group..."
+          curl -s -X POST \
+            "https://api.green-api.com/waInstance${GREEN_API_ID}/sendMessage/${GREEN_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"chatId\": \"120363370008112217@g.us\", \"message\": $(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}"
+          echo "Done."

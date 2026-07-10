@@ -1,44 +1,29 @@
-name: Link WhatsApp
+name: Link WhatsApp via Green API
 
 on:
   workflow_dispatch:
 
 jobs:
-  link-whatsapp:
+  link-instructions:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        working-directory: github_actions
-        run: npm install
-
-      - name: Clean existing session (prevents 401 from stale keys)
-        working-directory: github_actions
-        run: rm -rf .baileys_auth
-
-      - name: Generate QR Code (scan within 3 minutes)
-        working-directory: github_actions
-        timeout-minutes: 3
+      - name: Instructions to link your WhatsApp
         run: |
-          echo "A QR code will appear below. Scan it with WhatsApp (Linked Devices > Link a Device)."
-          echo "You have 3 minutes."
-          node whatsapp_sender.js link
-
-      - name: Commit Saved Session
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add -f github_actions/.baileys_auth/
-          git commit -m "Update WhatsApp Session keys (Baileys)" || echo "No changes to commit"
-          git push
+          echo "============================================================"
+          echo "  HOW TO LINK YOUR WHATSAPP TO GREEN API (one-time setup)"
+          echo "============================================================"
+          echo ""
+          echo "1. Go to https://console.green-api.com"
+          echo "2. Sign up for a FREE Developer account"
+          echo "3. Create a new instance (choose the FREE plan)"
+          echo "4. In your instance dashboard, click 'Scan QR Code'"
+          echo "5. Open WhatsApp on your phone > Linked Devices > Link a Device"
+          echo "6. Scan the QR code shown on the Green API website"
+          echo "7. Copy your idInstance and apiTokenInstance from the dashboard"
+          echo "8. Go to your GitHub repo Settings > Secrets and variables > Actions"
+          echo "9. Add two secrets:"
+          echo "      GREEN_API_ID    = your idInstance number"
+          echo "      GREEN_API_TOKEN = your apiTokenInstance"
+          echo ""
+          echo "That's it! Once done, run the 'Test Canteen Notifier' workflow."
+          echo "============================================================"
