@@ -23,7 +23,11 @@ jobs:
         working-directory: github_actions
         run: npm install
 
-      - name: Generate QR Code (scan within 60 seconds)
+      - name: Clean existing session (prevents 401 from stale keys)
+        working-directory: github_actions
+        run: rm -rf .baileys_auth
+
+      - name: Generate QR Code (scan within 3 minutes)
         working-directory: github_actions
         timeout-minutes: 3
         run: |
