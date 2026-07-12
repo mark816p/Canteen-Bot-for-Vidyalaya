@@ -2,8 +2,8 @@ name: Daily Canteen Notifier (Both Groups)
 
 on:
   schedule:
-    # 13:30 UTC = 7:00 PM IST
-    - cron: '30 13 * * *'
+    # 3:30 AM UTC = 9:00 AM IST, Monday-Saturday only
+    - cron: '30 3 * * 1-6'
   workflow_dispatch:
 
 jobs:
@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -29,14 +29,13 @@ jobs:
         run: python github_actions/scraper.py
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25'
 
       - name: Install Go Dependencies
         working-directory: github_actions/wa_sender
-        run: |
-          go mod tidy
+        run: go mod download
 
       - name: Send WhatsApp Message (Both Groups)
         working-directory: github_actions
