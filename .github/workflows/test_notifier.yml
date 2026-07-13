@@ -32,7 +32,7 @@ jobs:
 
       - name: Install Go Dependencies
         working-directory: github_actions/wa_sender
-        run: go mod download
+        run: go mod tidy
 
       - name: Send WhatsApp Message (Test - Savya Only)
         working-directory: github_actions
