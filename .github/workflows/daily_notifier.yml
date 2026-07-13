@@ -2,8 +2,8 @@ name: Daily Canteen Notifier (Both Groups)
 
 on:
   schedule:
-    # 13:30 UTC = 7:00 PM IST, every day including weekends
-    - cron: '30 13 * * *'
+    # 14:30 UTC = 8:00 PM IST, every day including weekends
+    - cron: '30 14 * * *'
   workflow_dispatch:
 
 jobs:
