@@ -1,9 +1,7 @@
 name: Daily Canteen Notifier (Both Groups)
 
 on:
-  schedule:
-    # 13:27 UTC = 6:57 PM IST (Scheduled slightly off the half-hour mark to avoid GitHub Actions delays)
-    - cron: '27 13 * * *'
+
   workflow_dispatch:
   repository_dispatch:
     types: [trigger-daily-notifier]
