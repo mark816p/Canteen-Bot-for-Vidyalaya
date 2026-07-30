@@ -65,24 +65,34 @@ def first_present(driver: webdriver.Chrome, selectors: list[tuple[str, str]], ti
     raise TimeoutException("No selectors were provided.")
 
 def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], visible_text: str) -> None:
-    element = first_present(driver, selectors)
-    dropdown = Select(element)
-    try:
-        dropdown.select_by_visible_text(visible_text)
-        return
-    except Exception:
-        wanted = visible_text.casefold()
-        for option in dropdown.options:
-            if wanted in option.text.casefold():
-                dropdown.select_by_visible_text(option.text)
+    for attempt in range(5):
+        try:
+            wait_for_document_ready(driver)
+            element = first_present(driver, selectors)
+            dropdown = Select(element)
+            try:
+                dropdown.select_by_visible_text(visible_text)
                 return
-        real_options = [option.text.strip() for option in dropdown.options if option.text.strip() and "select" not in option.text.casefold()]
-        if len(real_options) == 1:
-            log(f"Using the only available dropdown option: {real_options[0]}")
-            dropdown.select_by_visible_text(real_options[0])
-            return
-        options = ", ".join(option.text.strip() for option in dropdown.options if option.text.strip())
-        raise RuntimeError(f"Could not select {visible_text!r}. Available options: {options}")
+            except (StaleElementReferenceException, TimeoutException):
+                raise
+            except Exception:
+                wanted = visible_text.casefold()
+                for option in dropdown.options:
+                    if wanted in option.text.casefold():
+                        dropdown.select_by_visible_text(option.text)
+                        return
+                real_options = [option.text.strip() for option in dropdown.options if option.text.strip() and "select" not in option.text.casefold()]
+                if len(real_options) == 1:
+                    log(f"Using the only available dropdown option: {real_options[0]}")
+                    dropdown.select_by_visible_text(real_options[0])
+                    return
+                options = ", ".join(option.text.strip() for option in dropdown.options if option.text.strip())
+                raise RuntimeError(f"Could not select {visible_text!r}. Available options: {options}")
+        except (StaleElementReferenceException, TimeoutException) as exc:
+            if attempt == 4:
+                raise exc
+            log(f"Retrying dropdown selection for {visible_text!r} due to stale element or timeout (attempt {attempt + 1}/5)...")
+            time.sleep(2)
 
 def login_if_needed(driver: webdriver.Chrome) -> None:
     if LOGIN_URL_PART not in driver.current_url and driver.title.casefold() != "login":
