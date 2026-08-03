@@ -212,7 +212,8 @@ def scrape_menu() -> list[dict[str, str]]:
         if not records:
             records = extract_from_cards(driver)
         if not records:
-            raise RuntimeError("No dated canteen menu rows were found after search.")
+            log("No dated canteen menu rows were found after search. Returning empty list.")
+            return []
         return records
     finally:
         driver.quit()
@@ -237,7 +238,8 @@ def main():
     if not record:
         available = ", ".join(r["date"] for r in records)
         log(f"No menu was found for {target_date}. Available scraped dates: {available}")
-        sys.exit(0) # Do not fail the action if there is no menu for tomorrow
+        log("Proceeding with 'Not Updated Yet' message.")
+        record = {"date": target_date, "food": "1) Not Updated Yet"}
         
     if record["food"].strip().casefold() == "holiday" or "holiday" in record["food"].casefold():
         log(f"{target_date} is marked as HOLIDAY.")
