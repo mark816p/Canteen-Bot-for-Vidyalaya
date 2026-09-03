@@ -37,6 +37,17 @@ func main() {
 	}
 	log(fmt.Sprintf("Using Session DB at %s", dbPath))
 
+	// Clear any stale pairwise sessions, sender keys, and identity keys from the database
+	// so that whatsmeow establishes clean, fresh Signal sessions without MAC mismatches
+	rawDB, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	if err == nil {
+		_, _ = rawDB.Exec("DELETE FROM whatsmeow_sessions")
+		_, _ = rawDB.Exec("DELETE FROM whatsmeow_sender_keys")
+		_, _ = rawDB.Exec("DELETE FROM whatsmeow_identity_keys")
+		rawDB.Close()
+		log("Purged stale sessions, sender keys, and identity keys from DB to prevent MAC errors.")
+	}
+
 	// Open the whatsmeow store
 	dbLog := waLog.Stdout("Database", "ERROR", true)
 	container, err := sqlstore.New(context.Background(), "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), dbLog)
