@@ -125,7 +125,7 @@ func main() {
 
 		// Refresh group participants to ensure up-to-date device keys before sending
 		log(fmt.Sprintf("Refreshing participant list for group %s...", jidStr))
-		groupInfo, err := client.GetGroupInfo(jid)
+		groupInfo, err := client.GetGroupInfo(context.Background(), jid)
 		if err != nil {
 			log(fmt.Sprintf("Notice: GetGroupInfo returned: %v (proceeding with cached participants)", err))
 		} else {
