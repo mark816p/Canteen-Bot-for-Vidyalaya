@@ -13,6 +13,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
@@ -55,6 +56,18 @@ func main() {
 	// Create and connect the whatsmeow client
 	clientLog := waLog.Stdout("Client", "WARN", true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
+	client.AutoTrustIdentity = true
+	client.EnableAutoReconnect = true
+
+	// Register event handler to catch and process retry receipts (needed for iOS decryption)
+	client.AddEventHandler(func(rawEvt interface{}) {
+		switch evt := rawEvt.(type) {
+		case *events.Receipt:
+			if evt.Type == types.ReceiptTypeRetry {
+				log(fmt.Sprintf("Received RETRY request from %s for message IDs %v (whatsmeow will automatically re-encrypt keys)", evt.Sender.String(), evt.MessageIDs))
+			}
+		}
+	})
 
 	log("Connecting to WhatsApp...")
 	if err := client.Connect(); err != nil {
@@ -65,7 +78,7 @@ func main() {
 
 	// Wait for connection to fully establish
 	log("Waiting for connection to stabilise...")
-	time.Sleep(5 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	if !client.IsConnected() {
 		fmt.Fprintln(os.Stderr, "[WA Sender] Client is not connected after waiting. WhatsApp may have rejected the session.")
@@ -110,23 +123,33 @@ func main() {
 			continue
 		}
 
+		// Refresh group participants to ensure up-to-date device keys before sending
+		log(fmt.Sprintf("Refreshing participant list for group %s...", jidStr))
+		groupInfo, err := client.GetGroupInfo(jid)
+		if err != nil {
+			log(fmt.Sprintf("Notice: GetGroupInfo returned: %v (proceeding with cached participants)", err))
+		} else {
+			log(fmt.Sprintf("Verified group '%s' with %d participants", groupInfo.GroupName.Name, len(groupInfo.Participants)))
+		}
+
 		log(fmt.Sprintf("Sending message to %s...", jidStr))
-		_, err = client.SendMessage(context.Background(), jid, &waE2E.Message{
+		resp, err := client.SendMessage(context.Background(), jid, &waE2E.Message{
 			Conversation: proto.String(message),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[WA Sender] Failed to send to %s: %v\n", jidStr, err)
 			os.Exit(1)
 		}
-		log(fmt.Sprintf("Successfully sent to %s!", jidStr))
+		log(fmt.Sprintf("Successfully sent to %s! (Message ID: %s)", jidStr, resp.ID))
 
 		if len(groups) > 1 {
 			time.Sleep(3 * time.Second)
 		}
 	}
 
-	log("All messages sent! Done.")
-	time.Sleep(2 * time.Second) // allow flush before disconnect
+	log("All messages sent! Keeping connection open for 60s to fulfill key retry requests (especially for iPhones/APNs)...")
+	time.Sleep(60 * time.Second)
+	log("Done waiting window. Disconnecting cleanly.")
 }
 
 // openSQLiteDB is a helper to check if the DB has the required whatsmeow tables
