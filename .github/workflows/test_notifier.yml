@@ -34,6 +34,14 @@ jobs:
         working-directory: github_actions/wa_sender
         run: go mod tidy
 
+      - name: Restore WhatsApp Session Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/whatsapp_session.db
+          key: whatsapp-session-${{ github.run_id }}
+          restore-keys: |
+            whatsapp-session-
+
       - name: Send WhatsApp Message (Test - Savya Only)
         working-directory: github_actions
         env:
@@ -45,13 +53,18 @@ jobs:
             exit 0
           fi
           
-          # Reconstruct the session database using Python for robustness
+          # Reconstruct the session database only if not already restored from cache
           python -c "
           import os, base64, gzip, sys
+          if os.path.exists('/tmp/whatsapp_session.db') and os.path.getsize('/tmp/whatsapp_session.db') > 1000:
+              print('Using cached session database.')
+              sys.exit(0)
+          print('No cached session DB found. Reconstructing from secrets...')
           try:
               b = base64.b64decode(os.environ['PART1'] + os.environ['PART2'])
               with open('/tmp/whatsapp_session.db', 'wb') as f:
                   f.write(gzip.decompress(b))
+              print('Extracted session DB successfully.')
           except Exception as e:
               print('Extraction Failed:', e)
               sys.exit(1)
@@ -60,3 +73,10 @@ jobs:
           # Run the custom Go WhatsApp Sender we built
           cd wa_sender
           CGO_ENABLED=1 go run main.go test
+
+      - name: Save Updated WhatsApp Session Cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: /tmp/whatsapp_session.db
+          key: whatsapp-session-${{ github.run_id }}
