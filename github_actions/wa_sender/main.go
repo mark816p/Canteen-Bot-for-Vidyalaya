@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -37,16 +36,8 @@ func main() {
 	}
 	log(fmt.Sprintf("Using Session DB at %s", dbPath))
 
-	// Clear any stale pairwise sessions, sender keys, and identity keys from the database
-	// so that whatsmeow establishes clean, fresh Signal sessions without MAC mismatches
-	rawDB, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
-	if err == nil {
-		_, _ = rawDB.Exec("DELETE FROM whatsmeow_sessions")
-		_, _ = rawDB.Exec("DELETE FROM whatsmeow_sender_keys")
-		_, _ = rawDB.Exec("DELETE FROM whatsmeow_identity_keys")
-		rawDB.Close()
-		log("Purged stale sessions, sender keys, and identity keys from DB to prevent MAC errors.")
-	}
+	// We rely on GitHub Actions caching to maintain healthy session state across runs.
+	// Purging sessions aggressively every day breaks the Signal ratchet for offline devices.
 
 	// Open the whatsmeow store
 	dbLog := waLog.Stdout("Database", "ERROR", true)
@@ -161,9 +152,4 @@ func main() {
 	log("All messages sent! Keeping connection open for 60s to fulfill key retry requests (especially for iPhones/APNs)...")
 	time.Sleep(60 * time.Second)
 	log("Done waiting window. Disconnecting cleanly.")
-}
-
-// openSQLiteDB is a helper to check if the DB has the required whatsmeow tables
-func openSQLiteDB(path string) (*sql.DB, error) {
-	return sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", path))
 }
