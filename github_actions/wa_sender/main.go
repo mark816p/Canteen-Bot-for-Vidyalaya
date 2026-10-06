@@ -170,8 +170,9 @@ func main() {
 	client.AutoTrustIdentity = true
 	client.EnableAutoReconnect = true
 
-	// Enable persistent retry message store so whatsmeow automatically caches outgoing events in SQLite
-	client.UseRetryMessageStore = true
+	// We intentionally leave UseRetryMessageStore as false so whatsmeow delegates directly to GetMessageForRetry.
+	// This guarantees that any retry for older messages (or unknown IDs) falls back to our persistent store and fallback message instead of throwing 'sql: no rows in result set'.
+	client.UseRetryMessageStore = false
 
 	// Hook into GetMessageForRetry to fulfill retry receipts for past messages across process restarts
 	client.GetMessageForRetry = func(requester, to types.JID, id types.MessageID) *waE2E.Message {
