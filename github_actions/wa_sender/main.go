@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -19,6 +22,101 @@ import (
 
 func log(msg string) {
 	fmt.Printf("[WA Sender] %s\n", msg)
+}
+
+const sentMessagesPath = "/tmp/sent_messages.json"
+
+var (
+	sentMessagesLock sync.RWMutex
+	sentMessages     = make(map[string]string)
+)
+
+func initCustomSentMessageStore(dbPath string) {
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS custom_sent_messages (
+		id TEXT PRIMARY KEY,
+		text TEXT,
+		sent_at INTEGER
+	)`)
+}
+
+func loadSentMessages(dbPath string) {
+	sentMessagesLock.Lock()
+	defer sentMessagesLock.Unlock()
+
+	initCustomSentMessageStore(dbPath)
+
+	// 1. Load from SQLite database (persisted across runs in GitHub Actions cache)
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	if err == nil {
+		rows, err := db.Query("SELECT id, text FROM custom_sent_messages ORDER BY sent_at DESC LIMIT 50")
+		if err == nil {
+			for rows.Next() {
+				var id, text string
+				if err := rows.Scan(&id, &text); err == nil {
+					sentMessages[id] = text
+				}
+			}
+			rows.Close()
+		}
+		db.Close()
+	}
+
+	// 2. Also read /tmp/sent_messages.json if available
+	if data, err := os.ReadFile(sentMessagesPath); err == nil {
+		_ = json.Unmarshal(data, &sentMessages)
+	}
+
+	log(fmt.Sprintf("Loaded %d previously sent messages from persistent store.", len(sentMessages)))
+}
+
+func saveSentMessage(dbPath string, id string, text string) {
+	sentMessagesLock.Lock()
+	defer sentMessagesLock.Unlock()
+
+	sentMessages[id] = text
+
+	// 1. Save to SQLite database
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	if err == nil {
+		_, _ = db.Exec("INSERT OR REPLACE INTO custom_sent_messages (id, text, sent_at) VALUES (?, ?, ?)", id, text, time.Now().Unix())
+		_, _ = db.Exec("DELETE FROM custom_sent_messages WHERE id NOT IN (SELECT id FROM custom_sent_messages ORDER BY sent_at DESC LIMIT 50)")
+		db.Close()
+	}
+
+	// 2. Save to JSON file as fallback
+	data, err := json.MarshalIndent(sentMessages, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(sentMessagesPath, data, 0644)
+	}
+}
+
+func getSentMessage(dbPath string, id string) (string, bool) {
+	sentMessagesLock.RLock()
+	text, ok := sentMessages[id]
+	sentMessagesLock.RUnlock()
+	if ok {
+		return text, true
+	}
+
+	// Fallback lookup from SQLite DB
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	if err != nil {
+		return "", false
+	}
+	defer db.Close()
+	err = db.QueryRow("SELECT text FROM custom_sent_messages WHERE id = ?", id).Scan(&text)
+	if err == nil {
+		sentMessagesLock.Lock()
+		sentMessages[id] = text
+		sentMessagesLock.Unlock()
+		return text, true
+	}
+	return "", false
 }
 
 func main() {
@@ -36,8 +134,19 @@ func main() {
 	}
 	log(fmt.Sprintf("Using Session DB at %s", dbPath))
 
-	// We rely on GitHub Actions caching to maintain healthy session state across runs.
-	// Purging sessions aggressively every day breaks the Signal ratchet for offline devices.
+	// Load persistent sent message history from previous runs
+	loadSentMessages(dbPath)
+
+	// Load the current message to send early so it can serve as a fallback for retry receipts
+	msgFile := "../message_to_send.txt"
+	if _, err := os.Stat(msgFile); os.IsNotExist(err) {
+		msgFile = "github_actions/message_to_send.txt"
+	}
+	var currentMessage string
+	if msgBytes, err := os.ReadFile(msgFile); err == nil {
+		currentMessage = strings.TrimSpace(string(msgBytes))
+		log("Current message payload loaded successfully.")
+	}
 
 	// Open the whatsmeow store
 	dbLog := waLog.Stdout("Database", "ERROR", true)
@@ -61,7 +170,24 @@ func main() {
 	client.AutoTrustIdentity = true
 	client.EnableAutoReconnect = true
 
-	// Register event handler to catch and process retry receipts (needed for iOS decryption)
+	// Enable persistent retry message store so whatsmeow automatically caches outgoing events in SQLite
+	client.UseRetryMessageStore = true
+
+	// Hook into GetMessageForRetry to fulfill retry receipts for past messages across process restarts
+	client.GetMessageForRetry = func(requester, to types.JID, id types.MessageID) *waE2E.Message {
+		if text, ok := getSentMessage(dbPath, string(id)); ok {
+			log(fmt.Sprintf("Fulfilling retry for message ID %s requested by %s from persistent history", id, requester.String()))
+			return &waE2E.Message{Conversation: proto.String(text)}
+		}
+		if currentMessage != "" {
+			log(fmt.Sprintf("Fulfilling retry for message ID %s requested by %s using current message fallback", id, requester.String()))
+			return &waE2E.Message{Conversation: proto.String(currentMessage)}
+		}
+		log(fmt.Sprintf("Warning: No message content available for retry of %s requested by %s", id, requester.String()))
+		return nil
+	}
+
+	// Register event handler to log incoming retry receipts
 	client.AddEventHandler(func(rawEvt interface{}) {
 		switch evt := rawEvt.(type) {
 		case *events.Receipt:
@@ -78,9 +204,9 @@ func main() {
 	}
 	defer client.Disconnect()
 
-	// Wait for connection to fully establish
-	log("Waiting for connection to stabilise...")
-	time.Sleep(6 * time.Second)
+	// Wait for connection to stabilise and drain any queued retry receipts delivered by WhatsApp servers
+	log("Waiting 10s for connection to stabilise and draining queued retry receipts from yesterday...")
+	time.Sleep(10 * time.Second)
 
 	if !client.IsConnected() {
 		fmt.Fprintln(os.Stderr, "[WA Sender] Client is not connected after waiting. WhatsApp may have rejected the session.")
@@ -88,23 +214,11 @@ func main() {
 	}
 	log("Connected successfully!")
 
-	// Read the message to send
-	msgFile := "../message_to_send.txt"
-	if _, err := os.Stat(msgFile); os.IsNotExist(err) {
-		msgFile = "github_actions/message_to_send.txt"
-		if _, err := os.Stat(msgFile); os.IsNotExist(err) {
-			log("No message_to_send.txt found. Nothing to send (holiday or no menu).")
-			os.Exit(0)
-		}
+	if currentMessage == "" {
+		log("No message_to_send.txt found. Keeping connection open for 60s to fulfill queued retries, then exiting.")
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
 	}
-
-	msgBytes, err := os.ReadFile(msgFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[WA Sender] Failed to read message file: %v\n", err)
-		os.Exit(1)
-	}
-	message := strings.TrimSpace(string(msgBytes))
-	log("Message loaded successfully.")
 
 	// Determine target groups
 	var groups []string
@@ -136,7 +250,7 @@ func main() {
 
 		log(fmt.Sprintf("Sending message to %s...", jidStr))
 		resp, err := client.SendMessage(context.Background(), jid, &waE2E.Message{
-			Conversation: proto.String(message),
+			Conversation: proto.String(currentMessage),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[WA Sender] Failed to send to %s: %v\n", jidStr, err)
@@ -144,12 +258,15 @@ func main() {
 		}
 		log(fmt.Sprintf("Successfully sent to %s! (Message ID: %s)", jidStr, resp.ID))
 
+		// Persist the message ID so any future retry receipt can be answered cleanly
+		saveSentMessage(dbPath, string(resp.ID), currentMessage)
+
 		if len(groups) > 1 {
 			time.Sleep(3 * time.Second)
 		}
 	}
 
-	log("All messages sent! Keeping connection open for 60s to fulfill key retry requests (especially for iPhones/APNs)...")
-	time.Sleep(60 * time.Second)
+	log("All messages sent! Keeping connection open for 180s (3 minutes) to fulfill live retry requests (especially for iPhones/APNs and Android background sleep)...")
+	time.Sleep(180 * time.Second)
 	log("Done waiting window. Disconnecting cleanly.")
 }
