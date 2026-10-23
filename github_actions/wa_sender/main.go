@@ -119,6 +119,31 @@ func getSentMessage(dbPath string, id string) (string, bool) {
 	return "", false
 }
 
+func purgeStaleSessionKeys(dbPath string) {
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	if err != nil {
+		log(fmt.Sprintf("Failed to open DB for key purge: %v", err))
+		return
+	}
+	defer db.Close()
+
+	tablesToPurge := []string{
+		"whatsmeow_sessions",             // 1. Per-contact Signal session ratchets
+		"whatsmeow_sender_keys",          // 2. Group Sender Key states
+		"whatsmeow_app_state_sync_keys",  // 3. App-state synchronization keys
+	}
+	for _, table := range tablesToPurge {
+		res, err := db.Exec(fmt.Sprintf("DELETE FROM %s", table))
+		if err != nil {
+			log(fmt.Sprintf("Skipped %s: %v", table, err))
+		} else {
+			rows, _ := res.RowsAffected()
+			log(fmt.Sprintf("Purged %d rows from %s", rows, table))
+		}
+	}
+	log("Stale keys purged. Bot will fetch fresh keys on connect.")
+}
+
 func main() {
 	mode := "send"
 	if len(os.Args) > 1 {
@@ -136,6 +161,10 @@ func main() {
 
 	// Load persistent sent message history from previous runs
 	loadSentMessages(dbPath)
+
+	// Purge stale session ratchets and sender keys before connecting to avoid MAC mismatch ("Waiting for this message" loop)
+	// Keeps whatsmeow_device and whatsmeow_identity_keys intact so device pairing is preserved.
+	purgeStaleSessionKeys(dbPath)
 
 	// Load the current message to send early so it can serve as a fallback for retry receipts
 	msgFile := "../message_to_send.txt"
