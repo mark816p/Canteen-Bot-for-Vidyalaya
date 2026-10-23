@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -119,6 +123,57 @@ func getSentMessage(dbPath string, id string) (string, bool) {
 	return "", false
 }
 
+func saveAllLoadedSentMessages(dbPath string) {
+	sentMessagesLock.RLock()
+	defer sentMessagesLock.RUnlock()
+	if len(sentMessages) == 0 {
+		return
+	}
+	initCustomSentMessageStore(dbPath)
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	for id, text := range sentMessages {
+		_, _ = db.Exec("INSERT OR REPLACE INTO custom_sent_messages (id, text, sent_at) VALUES (?, ?, ?)", id, text, time.Now().Unix())
+	}
+}
+
+func ensureFreshDBSession(dbPath string) {
+	part1 := strings.TrimSpace(os.Getenv("PART1"))
+	part2 := strings.TrimSpace(os.Getenv("PART2"))
+	if part1 == "" || part2 == "" {
+		log("PART1 or PART2 not found in environment, proceeding with existing DB if available.")
+		return
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(part1 + part2)
+	if err != nil {
+		log(fmt.Sprintf("Warning: Failed to base64 decode PART1+PART2 secrets: %v", err))
+		return
+	}
+
+	gz, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		log(fmt.Sprintf("Warning: Failed to initialize gzip reader from secrets: %v", err))
+		return
+	}
+	defer gz.Close()
+
+	decompressed, err := io.ReadAll(gz)
+	if err != nil {
+		log(fmt.Sprintf("Warning: Failed to decompress secrets: %v", err))
+		return
+	}
+
+	if err := os.WriteFile(dbPath, decompressed, 0644); err != nil {
+		log(fmt.Sprintf("Warning: Failed to write decompressed DB to %s: %v", dbPath, err))
+		return
+	}
+	log(fmt.Sprintf("Reconstructed fresh session DB from GitHub Secrets (%d bytes).", len(decompressed)))
+}
+
 func purgeStaleSessionKeys(dbPath string) {
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath))
 	if err != nil {
@@ -153,16 +208,23 @@ func main() {
 	log(fmt.Sprintf("Starting in '%s' mode...", mode))
 
 	dbPath := "/tmp/whatsapp_session.db"
+
+	// 1. Load persistent sent message history from previous runs (cache or fallback)
+	loadSentMessages(dbPath)
+
+	// 2. Unpack fresh session DB from GitHub Secrets if PART1 & PART2 are provided in environment
+	ensureFreshDBSession(dbPath)
+
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "[WA Sender] Session DB not found at %s. Ensure GitHub Actions stitched the secrets correctly.\n", dbPath)
 		os.Exit(1)
 	}
 	log(fmt.Sprintf("Using Session DB at %s", dbPath))
 
-	// Load persistent sent message history from previous runs
-	loadSentMessages(dbPath)
+	// 3. Re-save loaded sent messages into the current session DB so retry receipts can be answered
+	saveAllLoadedSentMessages(dbPath)
 
-	// Purge stale session ratchets and sender keys before connecting to avoid MAC mismatch ("Waiting for this message" loop)
+	// 4. Purge stale session ratchets and sender keys before connecting to avoid MAC mismatch ("Waiting for this message" loop)
 	// Keeps whatsmeow_device and whatsmeow_identity_keys intact so device pairing is preserved.
 	purgeStaleSessionKeys(dbPath)
 
@@ -186,8 +248,8 @@ func main() {
 	}
 
 	deviceStore, err := container.GetFirstDevice(context.Background())
-	if err != nil || deviceStore == nil {
-		fmt.Fprintf(os.Stderr, "[WA Sender] No linked device found in session DB: %v\n", err)
+	if err != nil || deviceStore == nil || deviceStore.ID == nil {
+		fmt.Fprintf(os.Stderr, "[WA Sender] No valid linked device found in session DB (err: %v, deviceStore: %v)\n", err, deviceStore)
 		fmt.Fprintln(os.Stderr, "Have you linked GoWa to your phone?")
 		os.Exit(1)
 	}
