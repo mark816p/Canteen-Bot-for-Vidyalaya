@@ -2,7 +2,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from selenium import webdriver
@@ -229,9 +229,47 @@ def build_message(record: dict) -> str:
 {record["food"]}"""
 
 def main():
-    target_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    log(f"Target Date for GitHub Actions: {target_date}")
-    
+    # Remove any existing message_to_send.txt to prevent stale message delivery
+    msg_file = BASE_DIR / "message_to_send.txt"
+    alt_msg_file = BASE_DIR.parent / "message_to_send.txt"
+    for f in (msg_file, alt_msg_file):
+        if f.exists():
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+    # Ensure consistent date calculation using Indian Standard Time (IST, UTC+5:30)
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(timezone.utc).astimezone(IST)
+    target_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # Support overriding target_date for CLI testing or environment variables
+    if len(sys.argv) > 1 and sys.argv[1].startswith("--target-date="):
+        target_date = sys.argv[1].split("=", 1)[1]
+    elif len(sys.argv) > 2 and sys.argv[1] == "--target-date":
+        target_date = sys.argv[2]
+    elif os.environ.get("TARGET_DATE"):
+        target_date = os.environ["TARGET_DATE"]
+
+    log(f"Target Date for GitHub Actions: {target_date} (IST: {now.strftime('%Y-%m-%d %H:%M:%S')})")
+
+    # Vacation configuration (Vacation: today 31st Oct till 14th Nov 2026)
+    # Announcement sent on 31st Oct 2026 for date 1st Nov 2026:
+    if target_date == "2026-11-01":
+        vacation_msg = "Vacation Started. The bot will resume function from 14th November 2026."
+        log(f"Target date is {target_date}. Writing vacation announcement message.")
+        with open(msg_file, "w", encoding="utf-8") as f:
+            f.write(vacation_msg)
+        log("Message successfully written to message_to_send.txt")
+        return
+
+    # During vacation period (2026-11-02 to 2026-11-14 inclusive, or 2026-10-31), do not message anything:
+    if "2026-11-02" <= target_date <= "2026-11-14" or target_date == "2026-10-31":
+        log(f"Target date {target_date} is within the vacation period (till 14th November 2026). No message will be sent.")
+        return
+
+    log(f"Normal operation: Scraping menu for {target_date}...")
     records = scrape_menu()
     record = next((r for r in records if r["date"] == target_date), None)
     
@@ -246,7 +284,7 @@ def main():
         # Instead of skipping, we just write the holiday message!
 
     msg = build_message(record)
-    with open("github_actions/message_to_send.txt", "w", encoding="utf-8") as f:
+    with open(msg_file, "w", encoding="utf-8") as f:
         f.write(msg)
     log("Message successfully written to message_to_send.txt")
 

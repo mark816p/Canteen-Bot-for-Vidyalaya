@@ -483,6 +483,19 @@ def main() -> int:
     settings = Settings.from_env()
     target_date = args.target_date or (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
+    # Vacation configuration (Vacation: today 31st Oct till 14th Nov 2026)
+    VACATION_START_ANNOUNCEMENT_DATE = "2026-11-01"
+    VACATION_START_MESSAGE = "Vacation Started. The bot will resume function from 14th November 2026."
+
+    if target_date == VACATION_START_ANNOUNCEMENT_DATE:
+        log(f"Target date {target_date}: sending vacation announcement.")
+        send_whatsapp(settings, VACATION_START_MESSAGE, args.dry_run)
+        return 0
+
+    if "2026-11-02" <= target_date <= "2026-11-14" or target_date == "2026-10-31":
+        log(f"Target date {target_date} is within the vacation period (till 14th November 2026); no WhatsApp message sent.")
+        return 0
+
     conn = init_database(settings.database_path)
     try:
         record = None if args.refresh else get_record(conn, target_date)
