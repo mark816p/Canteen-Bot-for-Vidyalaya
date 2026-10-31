@@ -489,7 +489,9 @@ def main() -> int:
 
     if target_date == VACATION_START_ANNOUNCEMENT_DATE:
         log(f"Target date {target_date}: sending vacation announcement.")
-        send_whatsapp(settings, VACATION_START_MESSAGE, args.dry_run)
+        day_name = datetime.strptime(target_date, "%Y-%m-%d").strftime("%A")
+        vacation_record = (target_date, VACATION_START_MESSAGE, day_name)
+        send_whatsapp(settings, build_message(vacation_record), args.dry_run)
         return 0
 
     if "2026-11-02" <= target_date <= "2026-11-14" or target_date == "2026-10-31":

@@ -257,10 +257,14 @@ def main():
     # Vacation configuration (Vacation: today 31st Oct till 14th Nov 2026)
     # Announcement sent on 31st Oct 2026 for date 1st Nov 2026:
     if target_date == "2026-11-01":
-        vacation_msg = "Vacation Started. The bot will resume function from 14th November 2026."
+        vacation_record = {
+            "date": target_date,
+            "food": "Vacation Started. The bot will resume function from 14th November 2026."
+        }
+        msg = build_message(vacation_record)
         log(f"Target date is {target_date}. Writing vacation announcement message.")
         with open(msg_file, "w", encoding="utf-8") as f:
-            f.write(vacation_msg)
+            f.write(msg)
         log("Message successfully written to message_to_send.txt")
         return
 
