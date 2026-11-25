@@ -148,6 +148,20 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
         return
 
     log("Login page detected.")
+    wait_for_document_ready(driver, 30)
+
+    def login_context_ready(d):
+        try:
+            organization = Select(d.find_element(By.ID, "login-org")).first_selected_option.text.strip()
+            academic_year = Select(d.find_element(By.ID, "login-year")).first_selected_option.text.strip()
+            return organization and academic_year
+        except Exception:
+            return False
+
+    wait.until(login_context_ready)
+    organization = Select(driver.find_element(By.ID, "login-org")).first_selected_option.text.strip()
+    academic_year = Select(driver.find_element(By.ID, "login-year")).first_selected_option.text.strip()
+    log(f"Portal login context loaded: organization={organization!r}, academic_year={academic_year!r}.")
 
     def visible_login_field(selectors):
         for by, selector in selectors:
@@ -174,7 +188,9 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
     password.send_keys(os.environ["VIDYALAYA_PASSWORD"])
     log("Submitting portal sign-in form.")
     sign_in = driver.find_elements(By.XPATH, "//button[normalize-space()='Sign In']")
-    (sign_in[0] if sign_in else driver.find_element(By.CSS_SELECTOR, "button[type='submit']")).click()
+    sign_in_button = sign_in[0] if sign_in else driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+    wait.until(lambda _: sign_in_button.is_enabled())
+    sign_in_button.click()
     try:
         wait.until(lambda d: LOGIN_URL_PART not in d.current_url.casefold())
     except TimeoutException:
@@ -193,6 +209,12 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
             });
             return {
                 url: location.href,
+                selects: Array.from(document.querySelectorAll('select')).map((element) => ({
+                    id: element.id,
+                    value: element.value,
+                    selectedText: element.selectedOptions[0]?.textContent?.trim() || '',
+                    optionCount: element.options.length
+                })),
                 inputs: Array.from(document.querySelectorAll('input')).filter((e) => e.offsetParent !== null).map(describe),
                 buttons: Array.from(document.querySelectorAll('button')).filter((e) => e.offsetParent !== null).map(describe),
                 forms: Array.from(document.forms).map((form) => ({ action: form.action, valid: form.checkValidity() })),
