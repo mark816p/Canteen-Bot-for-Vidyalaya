@@ -467,12 +467,19 @@ def scrape_menu() -> list[dict[str, str]]:
                                     continue
                                 items = break_type.get("menuItems", [])
                                 first_item = items[0] if items and isinstance(items[0], dict) else None
-                                break_samples.append({
+                                item_sample = {
                                     "title": break_type.get("breakTypeTitle", break_type.get("title")),
                                     "menuItemCount": len(items) if isinstance(items, list) else None,
+                                    "menuItemsType": type(items).__name__,
                                     "firstItemKeys": sorted(first_item.keys()) if first_item else [],
                                     "firstItemSample": {key: value for key, value in first_item.items() if isinstance(value, (str, int, float, bool)) or value is None} if first_item else {},
-                                })
+                                }
+                                if isinstance(items, str):
+                                    item_sample["menuItemsSample"] = items[:300]
+                                elif isinstance(items, dict):
+                                    item_sample["menuItemsKeys"] = sorted(items.keys())
+                                    item_sample["menuItemsSample"] = {key: value for key, value in items.items() if isinstance(value, (str, int, float, bool)) or value is None}
+                                break_samples.append(item_sample)
                             target_rows.append({"menuDate": row.get("menuDate"), "breakTypes": break_samples})
                         response["targetRows"] = target_rows
                 except Exception as exc:
