@@ -152,9 +152,18 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
 
     def login_context_ready(d):
         try:
-            organization = Select(d.find_element(By.ID, "login-org")).first_selected_option.text.strip()
-            academic_year = Select(d.find_element(By.ID, "login-year")).first_selected_option.text.strip()
-            return organization and academic_year
+            organization_select = Select(d.find_element(By.ID, "login-org"))
+            academic_year_select = Select(d.find_element(By.ID, "login-year"))
+            organization = organization_select.first_selected_option
+            academic_year = academic_year_select.first_selected_option
+            return (
+                len(organization_select.options) > 1
+                and len(academic_year_select.options) > 1
+                and organization.get_attribute("value")
+                and organization.text.strip().casefold() not in {"", "- select -"}
+                and academic_year.get_attribute("value")
+                and academic_year.text.strip().casefold() not in {"", "- select -"}
+            )
         except Exception:
             return False
 
