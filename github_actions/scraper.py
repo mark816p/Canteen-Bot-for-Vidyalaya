@@ -276,7 +276,9 @@ def click_search(driver: webdriver.Chrome) -> None:
             if not buttons:
                 continue
             try:
-                wait_for_page(driver, 10).until(EC.element_to_be_clickable((by, selector))).click()
+                button = wait_for_page(driver, 10).until(EC.element_to_be_clickable((by, selector)))
+                log(f"Clicking menu search control: {button.get_attribute('id')!r}, text={button.text.strip()!r}.")
+                button.click()
                 return
             except StaleElementReferenceException:
                 time.sleep(1)
@@ -369,6 +371,10 @@ def scrape_menu() -> list[dict[str, str]]:
         time.sleep(1)
         select_dropdown(driver, [(By.ID, "breaktype"), (By.CSS_SELECTOR, "select[id*='break']")], break_name)
 
+        try:
+            driver.get_log("performance")
+        except Exception:
+            pass
         click_search(driver)
         try:
             wait_for_page(driver).until(lambda d: any(DATE_RE.search(row.text) for row in d.find_elements(By.CSS_SELECTOR, "#canteenMenu tbody tr")))
@@ -387,11 +393,39 @@ def scrape_menu() -> list[dict[str, str]]:
                     headers: table ? Array.from(table.querySelectorAll('thead th')).map((e) => e.innerText.trim()) : [],
                     rowCount: table ? table.querySelectorAll('tbody tr').length : 0,
                     firstRows: table ? Array.from(table.querySelectorAll('tbody tr')).slice(0, 3).map((r) => r.innerText.trim()) : [],
+                    buttons: Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'))
+                        .filter((e) => e.offsetParent !== null).map((e) => ({ id: e.id, type: e.type, text: (e.innerText || e.value || '').trim(), disabled: e.disabled })),
                     alerts: Array.from(document.querySelectorAll('[role="alert"], .alert, .validation-summary-errors'))
                         .map((e) => e.innerText.trim()).filter(Boolean)
                 };
             """)
-            log(f"Menu results did not load after search. Diagnostic: {diagnostic}")
+            network = []
+            pending_requests = {}
+            for entry in driver.get_log("performance"):
+                try:
+                    event = json.loads(entry["message"])["message"]
+                    params = event.get("params", {})
+                    if event.get("method") == "Network.requestWillBeSent":
+                        request = params.get("request", {})
+                        parsed = urlsplit(request.get("url", ""))
+                        if parsed.hostname and parsed.hostname.endswith("onlinevidyalaya.net"):
+                            pending_requests[params.get("requestId")] = {
+                                "host": parsed.hostname,
+                                "path": parsed.path,
+                                "method": request.get("method"),
+                            }
+                    elif event.get("method") == "Network.responseReceived":
+                        response = params.get("response", {})
+                        parsed = urlsplit(response.get("url", ""))
+                        if parsed.hostname and parsed.hostname.endswith("onlinevidyalaya.net"):
+                            network.append({
+                                **pending_requests.get(params.get("requestId"), {"host": parsed.hostname, "path": parsed.path}),
+                                "status": response.get("status"),
+                                "type": response.get("type"),
+                            })
+                except Exception:
+                    continue
+            log(f"Menu results did not load after search. Diagnostic: {diagnostic}; network: {network[-25:]}")
             raise
         
         records = extract_from_grid(driver)
