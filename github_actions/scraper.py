@@ -285,7 +285,6 @@ def scrape_menu() -> list[dict[str, str]]:
         driver.get(LOGIN_URL)
         login_if_needed(driver)
         driver.get(MENU_URL)
-        login_if_needed(driver)
         log(f"Canteen page loaded at {driver.current_url}.")
 
         select_dropdown(driver, [(By.ID, "selectcanteen"), (By.CSS_SELECTOR, "select[id*='canteen']")], canteen_name)
