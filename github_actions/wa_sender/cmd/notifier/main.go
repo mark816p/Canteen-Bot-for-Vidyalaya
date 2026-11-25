@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/mark816p/Canteen-Bot-for-Vidyalaya/github_actions/wa_sender/internal/crypto"
@@ -237,9 +238,23 @@ func materializeEncryptedSession(encPath string) error {
 
 	raw := strings.TrimSpace(os.Getenv("WA_SESSION_ENC"))
 	if raw == "" {
-		raw = strings.TrimSpace(os.Getenv("WA_SESSION_ENC_PART1")) +
-			strings.TrimSpace(os.Getenv("WA_SESSION_ENC_PART2")) +
-			strings.TrimSpace(os.Getenv("WA_SESSION_ENC_PART3"))
+		parts := make(map[string]string)
+		for _, item := range os.Environ() {
+			key, value, ok := strings.Cut(item, "=")
+			if ok && strings.HasPrefix(key, "WA_SESSION_ENC_PART") {
+				parts[key] = strings.TrimSpace(value)
+			}
+		}
+		keys := make([]string, 0, len(parts))
+		for key := range parts {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		var builder strings.Builder
+		for _, key := range keys {
+			builder.WriteString(parts[key])
+		}
+		raw = builder.String()
 	}
 	if raw == "" {
 		return nil
