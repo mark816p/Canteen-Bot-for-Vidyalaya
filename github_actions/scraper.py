@@ -8,7 +8,6 @@ from pathlib import Path
 from selenium import webdriver
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.support import expected_conditions as EC
@@ -75,16 +74,15 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             option_texts = [option.text.strip() for option in dropdown.options]
             log(f"Dropdown options for {visible_text!r}: {option_texts}")
 
-            # This portal lazily populates the canteen and break controls after
-            # they receive keyboard focus. Sending Arrow Down directly changes
-            # the selection and triggers the portal's loader in headless Chrome.
+            # The portal lazily populates dependent options when a native
+            # select is opened. Selecting the canteen itself uses its real item.
             if len(option_texts) <= 1 or not any(visible_text.casefold() in text.casefold() for text in option_texts):
                 try:
-                    element.send_keys(Keys.ARROW_DOWN)
+                    element.click()
                 except StaleElementReferenceException:
-                    # Selecting the first available item can itself re-render
-                    # the control. The wait below always reads a fresh element.
-                    log(f"Portal replaced the {visible_text!r} filter while loading its options.")
+                    # Opening a filter can replace its DOM node. The wait
+                    # below reads fresh elements on every poll.
+                    log(f"Portal refreshed the {visible_text!r} filter while opening it.")
 
                 def options_ready(d):
                     wanted = visible_text.casefold()
@@ -140,15 +138,35 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
     wait.until(lambda d:
         LOGIN_URL_PART in d.current_url.casefold()
         or d.find_elements(By.CSS_SELECTOR, "input[formcontrolname='username']")
-        or d.find_elements(By.ID, "selectcanteen")
+        or d.find_elements(By.ID, "login-org")
     )
     if LOGIN_URL_PART not in driver.current_url.casefold():
         log("Existing Vidyalaya session is authenticated.")
         return
 
     log("Login page detected.")
-    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='username']"))).send_keys(os.environ["VIDYALAYA_USERNAME"])
-    driver.find_element(By.CSS_SELECTOR, "input[formcontrolname='password']").send_keys(os.environ["VIDYALAYA_PASSWORD"])
+
+    def visible_login_field(selectors):
+        for by, selector in selectors:
+            for element in driver.find_elements(by, selector):
+                if element.is_displayed():
+                    return element
+        return False
+
+    username = wait.until(lambda _: visible_login_field([
+        (By.CSS_SELECTOR, "input[formcontrolname='username']"),
+        (By.CSS_SELECTOR, "input[autocomplete='username']"),
+        (By.CSS_SELECTOR, "input[name*='user']"),
+        (By.CSS_SELECTOR, "input[id*='user']"),
+        (By.CSS_SELECTOR, "input[type='text']"),
+    ]))
+    password = wait.until(lambda _: visible_login_field([
+        (By.CSS_SELECTOR, "input[formcontrolname='password']"),
+        (By.CSS_SELECTOR, "input[autocomplete='current-password']"),
+        (By.CSS_SELECTOR, "input[type='password']"),
+    ]))
+    username.send_keys(os.environ["VIDYALAYA_USERNAME"])
+    password.send_keys(os.environ["VIDYALAYA_PASSWORD"])
     sign_in = driver.find_elements(By.XPATH, "//button[normalize-space()='Sign In']")
     (sign_in[0] if sign_in else driver.find_element(By.CSS_SELECTOR, "button[type='submit']")).click()
     wait.until(lambda d: LOGIN_URL_PART not in d.current_url)
