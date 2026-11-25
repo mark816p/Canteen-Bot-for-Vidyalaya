@@ -445,6 +445,17 @@ def scrape_menu() -> list[dict[str, str]]:
                     elif isinstance(payload, list):
                         response["rowCount"] = len(payload)
                         response["firstRowKeys"] = sorted(payload[0].keys()) if payload and isinstance(payload[0], dict) else []
+                        if payload and isinstance(payload[0], dict):
+                            sample = {}
+                            for key in ("menuDate", "menuMonth", "menuYear", "days", "className", "canteenId", "breakTypes"):
+                                value = payload[0].get(key)
+                                if isinstance(value, (str, int, float, bool)) or value is None:
+                                    sample[key] = value
+                                elif isinstance(value, list):
+                                    sample[f"{key}Count"] = len(value)
+                                    sample[f"{key}FirstType"] = type(value[0]).__name__ if value else None
+                                    sample[f"{key}FirstKeys"] = sorted(value[0].keys()) if value and isinstance(value[0], dict) else []
+                            response["firstRowSample"] = sample
                 except Exception as exc:
                     response["bodySummaryError"] = type(exc).__name__
                 finally:
