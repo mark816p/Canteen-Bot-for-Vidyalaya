@@ -17,6 +17,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -288,6 +289,15 @@ func main() {
 			}
 		}
 	})
+
+	log("Fetching latest WhatsApp Web version...")
+	latestVersion, err := whatsmeow.GetLatestVersion(context.Background(), nil)
+	if err != nil {
+		log(fmt.Sprintf("Could not fetch latest WhatsApp Web version: %v", err))
+	} else {
+		store.SetWAVersion(*latestVersion)
+		log(fmt.Sprintf("Using WhatsApp Web version %s", latestVersion.String()))
+	}
 
 	log("Connecting to WhatsApp...")
 	if err := client.Connect(); err != nil {
