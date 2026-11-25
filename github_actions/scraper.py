@@ -96,12 +96,17 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             time.sleep(2)
 
 def login_if_needed(driver: webdriver.Chrome) -> None:
-    username_fields = driver.find_elements(By.CSS_SELECTOR, "input[formcontrolname='username']")
-    if LOGIN_URL_PART not in driver.current_url.casefold() and not username_fields:
+    wait = wait_for_page(driver, 30)
+    wait.until(lambda d:
+        LOGIN_URL_PART in d.current_url.casefold()
+        or d.find_elements(By.CSS_SELECTOR, "input[formcontrolname='username']")
+        or d.find_elements(By.ID, "selectcanteen")
+    )
+    if LOGIN_URL_PART not in driver.current_url.casefold():
+        log("Existing Vidyalaya session is authenticated.")
         return
 
     log("Login page detected.")
-    wait = wait_for_page(driver, 30)
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='username']"))).send_keys(os.environ["VIDYALAYA_USERNAME"])
     driver.find_element(By.CSS_SELECTOR, "input[formcontrolname='password']").send_keys(os.environ["VIDYALAYA_PASSWORD"])
     sign_in = driver.find_elements(By.XPATH, "//button[normalize-space()='Sign In']")
@@ -208,6 +213,7 @@ def scrape_menu() -> list[dict[str, str]]:
         driver.get(MENU_URL)
         login_if_needed(driver)
         driver.get(MENU_URL)
+        log(f"Canteen page loaded at {driver.current_url}.")
 
         select_dropdown(driver, [(By.ID, "selectcanteen"), (By.CSS_SELECTOR, "select[id*='canteen']")], canteen_name)
         time.sleep(1)
