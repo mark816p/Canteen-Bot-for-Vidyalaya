@@ -420,11 +420,35 @@ def scrape_menu() -> list[dict[str, str]]:
                         if parsed.hostname and parsed.hostname.endswith("onlinevidyalaya.net"):
                             network.append({
                                 **pending_requests.get(params.get("requestId"), {"host": parsed.hostname, "path": parsed.path}),
+                                "requestId": params.get("requestId"),
                                 "status": response.get("status"),
                                 "type": response.get("type"),
+                                "mimeType": response.get("mimeType"),
                             })
                 except Exception:
                     continue
+            for response in network:
+                if not response.get("path", "").endswith("/GetCanteenMenuList"):
+                    continue
+                try:
+                    body_result = driver.execute_cdp_cmd("Network.getResponseBody", {"requestId": response["requestId"]})
+                    body = body_result.get("body", "")
+                    if body_result.get("base64Encoded"):
+                        import base64
+                        body = base64.b64decode(body).decode("utf-8", errors="replace")
+                    payload = json.loads(body)
+                    response["payloadType"] = type(payload).__name__
+                    if isinstance(payload, dict):
+                        response["payloadKeys"] = sorted(payload.keys())
+                        response["successFlag"] = payload.get("success", payload.get("isSuccess"))
+                        response["arrayCounts"] = {key: len(value) for key, value in payload.items() if isinstance(value, list)}
+                    elif isinstance(payload, list):
+                        response["rowCount"] = len(payload)
+                        response["firstRowKeys"] = sorted(payload[0].keys()) if payload and isinstance(payload[0], dict) else []
+                except Exception as exc:
+                    response["bodySummaryError"] = type(exc).__name__
+                finally:
+                    response.pop("requestId", None)
             log(f"Menu results did not load after search. Diagnostic: {diagnostic}; network: {network[-25:]}")
             raise
         
