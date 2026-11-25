@@ -31,6 +31,8 @@ func main() {
 		err = runGroups(args)
 	case "send":
 		err = runSend(args)
+	case "compact":
+		err = runCompact(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -53,6 +55,7 @@ Commands:
   pair     Pair a WhatsApp account via QR code locally and save an encrypted session
   groups   List joined WhatsApp groups and their @g.us JIDs
   send     Send a message to the configured WhatsApp group(s) and re-encrypt the session
+  compact  Remove cached WhatsApp data and write a smaller encrypted session copy
 
 Environment variables:
   WA_SESSION_KEY   Required 256-bit encryption key (64 hex chars or 44-char base64)
@@ -109,6 +112,29 @@ func runGroups(args []string) error {
 		}
 		return nil
 	})
+}
+
+func runCompact(args []string) error {
+	fs := flag.NewFlagSet("compact", flag.ContinueOnError)
+	input := fs.String("session-enc", "session.db.enc", "input encrypted session file")
+	output := fs.String("output", "session.compact.db.enc", "output encrypted session file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	key, err := loadKey()
+	if err != nil {
+		return err
+	}
+	if err := crypto.CompactSessionFile(*input, *output, key); err != nil {
+		return err
+	}
+	f, err := os.Stat(*output)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Compacted encrypted session written to %s (%d bytes)\n", *output, f.Size())
+	return nil
 }
 
 func runSend(args []string) error {

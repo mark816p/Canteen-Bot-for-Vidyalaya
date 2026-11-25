@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -12,7 +13,49 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	_ "modernc.org/sqlite"
 )
+
+// CompactSessionFile removes cached message/contact data while preserving the
+// paired device, identity, session, sender-key, and app-state records needed
+// for sending. It writes a separate encrypted output file.
+func CompactSessionFile(inputPath, outputPath string, key []byte) error {
+	tempDB, cleanup, err := DecryptToTemp(inputPath, key, false)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	db, err := sql.Open("sqlite", tempDB)
+	if err != nil {
+		return fmt.Errorf("open session database for compaction: %w", err)
+	}
+	defer db.Close()
+
+	statements := []string{
+		"PRAGMA journal_mode=DELETE",
+		"DELETE FROM whatsmeow_message_secrets",
+		"DELETE FROM whatsmeow_contacts",
+		"DELETE FROM whatsmeow_lid_map",
+		"DELETE FROM whatsmeow_event_buffer",
+		"DELETE FROM whatsmeow_retry_buffer",
+		"DELETE FROM whatsmeow_privacy_tokens",
+		"DELETE FROM whatsmeow_chat_settings",
+		"DELETE FROM whatsmeow_pre_keys",
+		"DELETE FROM whatsmeow_app_state_mutation_macs",
+		"VACUUM",
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return fmt.Errorf("compact session database (%s): %w", statement, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("close compacted session database: %w", err)
+	}
+	return EncryptFromFile(tempDB, outputPath, key)
+}
 
 const (
 	// fileMagic identifies encrypted session blobs and versions the format.
