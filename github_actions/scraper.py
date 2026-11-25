@@ -70,7 +70,9 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             wait_for_document_ready(driver)
             element = first_present(driver, selectors)
             dropdown = Select(element)
-            wait_for_page(driver).until(lambda _: len(dropdown.options) > 1)
+            if len(dropdown.options) <= 1:
+                element.click()
+                wait_for_page(driver).until(lambda _: len(dropdown.options) > 1)
             try:
                 dropdown.select_by_visible_text(visible_text)
                 return
