@@ -456,6 +456,25 @@ def scrape_menu() -> list[dict[str, str]]:
                                     sample[f"{key}FirstType"] = type(value[0]).__name__ if value else None
                                     sample[f"{key}FirstKeys"] = sorted(value[0].keys()) if value and isinstance(value[0], dict) else []
                             response["firstRowSample"] = sample
+                        target_date = (datetime.now(timezone(timedelta(hours=5, minutes=30))) + timedelta(days=1)).strftime("%Y-%m-%d")
+                        target_rows = []
+                        for row in payload:
+                            if not isinstance(row, dict) or str(row.get("menuDate", ""))[:10] != target_date:
+                                continue
+                            break_samples = []
+                            for break_type in row.get("breakTypes", []):
+                                if not isinstance(break_type, dict):
+                                    continue
+                                items = break_type.get("menuItems", [])
+                                first_item = items[0] if items and isinstance(items[0], dict) else None
+                                break_samples.append({
+                                    "title": break_type.get("breakTypeTitle", break_type.get("title")),
+                                    "menuItemCount": len(items) if isinstance(items, list) else None,
+                                    "firstItemKeys": sorted(first_item.keys()) if first_item else [],
+                                    "firstItemSample": {key: value for key, value in first_item.items() if isinstance(value, (str, int, float, bool)) or value is None} if first_item else {},
+                                })
+                            target_rows.append({"menuDate": row.get("menuDate"), "breakTypes": break_samples})
+                        response["targetRows"] = target_rows
                 except Exception as exc:
                     response["bodySummaryError"] = type(exc).__name__
                 finally:
