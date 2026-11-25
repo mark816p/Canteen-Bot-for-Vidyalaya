@@ -167,12 +167,12 @@ func runSend(args []string) error {
 		if len(groups) == 0 {
 			return errors.New("no target group provided (use WA_GROUP_JIDS or WA_GROUP_JID)")
 		}
-		for _, target := range groups {
-			resp, sendErr := client.SendGroupMessage(ctx, target, body)
-			if sendErr != nil {
-				return sendErr
-			}
-			fmt.Printf("Message sent to group %s (ID=%s, timestamp=%s)\n", target, resp.ID, resp.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
+		responses, sendErr := client.SendGroupMessages(ctx, groups, body)
+		if sendErr != nil {
+			return sendErr
+		}
+		for index, resp := range responses {
+			fmt.Printf("Message sent to group %s (ID=%s, timestamp=%s)\n", groups[index], resp.ID, resp.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
 		}
 		return nil
 	})

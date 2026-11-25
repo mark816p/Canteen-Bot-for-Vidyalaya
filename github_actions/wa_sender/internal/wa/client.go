@@ -212,44 +212,61 @@ func ParseGroupJID(raw string) (types.JID, error) {
 // SendGroupMessage validates the target group JID, connects, verifies group membership,
 // sends the text message, and waits briefly so sender-key/DB updates flush cleanly.
 func (s *Store) SendGroupMessage(ctx context.Context, groupJIDStr, text string) (whatsmeow.SendResponse, error) {
-	jid, err := ParseGroupJID(groupJIDStr)
+	responses, err := s.SendGroupMessages(ctx, []string{groupJIDStr}, text)
 	if err != nil {
 		return whatsmeow.SendResponse{}, err
 	}
+	return responses[0], nil
+}
 
+// SendGroupMessages validates all targets, connects once, and sends to each
+// group over the same WhatsApp connection.
+func (s *Store) SendGroupMessages(ctx context.Context, groupJIDStrs []string, text string) ([]whatsmeow.SendResponse, error) {
+	if len(groupJIDStrs) == 0 {
+		return nil, errors.New("at least one group JID is required")
+	}
 	msgText := strings.TrimSpace(text)
 	if msgText == "" {
-		return whatsmeow.SendResponse{}, errors.New("message text cannot be empty")
+		return nil, errors.New("message text cannot be empty")
 	}
 
+	targets := make([]types.JID, 0, len(groupJIDStrs))
+	for _, raw := range groupJIDStrs {
+		jid, err := ParseGroupJID(raw)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, jid)
+	}
 	if err := s.connectExisting(ctx); err != nil {
-		return whatsmeow.SendResponse{}, err
+		return nil, err
 	}
 
-	// Verify membership and warm participant metadata before sending to a large (~1000 member) group.
-	infoCtx, cancelInfo := context.WithTimeout(ctx, connectTimeout)
-	groupInfo, err := s.client.GetGroupInfo(infoCtx, jid)
-	cancelInfo()
-	if err != nil {
-		return whatsmeow.SendResponse{}, fmt.Errorf("verify group %s: %w", jid.String(), err)
-	}
-	if groupInfo.IsAnnounce && !isSelfAdmin(s.client.Store.ID, s.client.Store.LID, groupInfo.Participants) {
-		return whatsmeow.SendResponse{}, fmt.Errorf("group %q is announcement-only (admins only) and this account is not an admin", groupInfo.Name)
-	}
+	responses := make([]whatsmeow.SendResponse, 0, len(targets))
+	for _, jid := range targets {
+		// Verify membership and warm participant metadata before sending to a large group.
+		infoCtx, cancelInfo := context.WithTimeout(ctx, connectTimeout)
+		groupInfo, err := s.client.GetGroupInfo(infoCtx, jid)
+		cancelInfo()
+		if err != nil {
+			return responses, fmt.Errorf("verify group %s: %w", jid.String(), err)
+		}
+		if groupInfo.IsAnnounce && !isSelfAdmin(s.client.Store.ID, s.client.Store.LID, groupInfo.Participants) {
+			return responses, fmt.Errorf("group %q is announcement-only (admins only) and this account is not an admin", groupInfo.Name)
+		}
 
-	sendCtx, cancelSend := context.WithTimeout(ctx, sendTimeout)
-	defer cancelSend()
-
-	resp, err := s.client.SendMessage(sendCtx, jid, &waE2E.Message{
-		Conversation: proto.String(msgText),
-	})
-	if err != nil {
-		return whatsmeow.SendResponse{}, fmt.Errorf("send message to group %q: %w", groupInfo.Name, err)
+		sendCtx, cancelSend := context.WithTimeout(ctx, sendTimeout)
+		resp, err := s.client.SendMessage(sendCtx, jid, &waE2E.Message{
+			Conversation: proto.String(msgText),
+		})
+		cancelSend()
+		if err != nil {
+			return responses, fmt.Errorf("send message to group %q: %w", groupInfo.Name, err)
+		}
+		responses = append(responses, resp)
+		time.Sleep(flushDelay)
 	}
-
-	// Allow trailing sender-key distribution / SQLite writes to settle before closing.
-	time.Sleep(flushDelay)
-	return resp, nil
+	return responses, nil
 }
 
 func isSelfAdmin(selfID *types.JID, selfLID types.JID, participants []types.GroupParticipant) bool {
