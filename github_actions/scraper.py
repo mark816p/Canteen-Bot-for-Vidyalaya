@@ -79,7 +79,7 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             # Chrome opens its popup but does not trigger the portal's loader.
             if len(option_texts) <= 1 or not any(visible_text.casefold() in text.casefold() for text in option_texts):
                 element.click()
-                element.send_keys(Keys.ARROWDOWN)
+                element.send_keys(Keys.ARROW_DOWN)
                 element.send_keys(Keys.ENTER)
 
                 def options_ready(d):
