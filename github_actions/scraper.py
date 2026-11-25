@@ -175,12 +175,28 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
     try:
         wait.until(lambda d: LOGIN_URL_PART not in d.current_url.casefold())
     except TimeoutException:
-        error_text = driver.execute_script("""
-            return Array.from(document.querySelectorAll('.alert, .invalid-feedback, [role="alert"]'))
-                .filter((element) => element.innerText.trim())
-                .map((element) => element.innerText.trim());
+        login_state = driver.execute_script("""
+            const describe = (element) => ({
+                tag: element.tagName,
+                type: element.getAttribute('type'),
+                id: element.id,
+                name: element.getAttribute('name'),
+                formControlName: element.getAttribute('formcontrolname'),
+                placeholder: element.getAttribute('placeholder'),
+                autocomplete: element.getAttribute('autocomplete'),
+                text: element.innerText.trim(),
+                disabled: element.disabled
+            });
+            return {
+                url: location.href,
+                inputs: Array.from(document.querySelectorAll('input')).filter((e) => e.offsetParent !== null).map(describe),
+                buttons: Array.from(document.querySelectorAll('button')).filter((e) => e.offsetParent !== null).map(describe),
+                validation: Array.from(document.querySelectorAll('.alert, .invalid-feedback, [role="alert"]'))
+                    .filter((element) => element.innerText.trim())
+                    .map((element) => element.innerText.trim())
+            };
         """)
-        log(f"Portal sign-in did not leave the login route. Visible validation: {error_text}")
+        log(f"Portal sign-in did not leave the login route. Control diagnostic: {login_state}")
         raise
 
 def wait_for_document_ready(driver: webdriver.Chrome, timeout: int = 15) -> None:
