@@ -347,6 +347,45 @@ def extract_from_cards(driver: webdriver.Chrome) -> list[dict[str, str]]:
             records.append({"date": normalize_date(text), "food": format_food(food_text)})
     return unique_records(records)
 
+def extract_api_menu_records(payload, canteen_id: str, break_name: str) -> list[dict[str, str]]:
+    if not isinstance(payload, list):
+        return []
+
+    wanted_break = break_name.casefold()
+    records = []
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        if canteen_id and str(row.get("canteenId", "")) != canteen_id:
+            continue
+        raw_date = str(row.get("menuDate", ""))[:10]
+        try:
+            menu_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+        for break_type in row.get("breakTypes", []):
+            if not isinstance(break_type, dict):
+                continue
+            break_title = str(break_type.get("breakTypeTitle") or break_type.get("title") or "")
+            if wanted_break not in break_title.casefold():
+                continue
+
+            menu_items = break_type.get("menuItems")
+            if isinstance(menu_items, str):
+                food_text = menu_items
+            elif isinstance(menu_items, list):
+                food_text = "\n".join(
+                    str(item) if isinstance(item, str) else str(item.get("name", item.get("title", "")))
+                    for item in menu_items
+                    if isinstance(item, (str, dict))
+                )
+            else:
+                food_text = ""
+            if food_text.strip():
+                records.append({"date": menu_date, "food": format_food(food_text)})
+    return unique_records(records)
+
 def unique_records(records: list[dict[str, str]]) -> list[dict[str, str]]:
     by_date = {}
     for record in records:
@@ -376,6 +415,49 @@ def scrape_menu() -> list[dict[str, str]]:
         except Exception:
             pass
         click_search(driver)
+        selected_canteen = Select(first_present(driver, [(By.ID, "selectcanteen")])).first_selected_option.get_attribute("value") or ""
+        canteen_match = re.search(r"(\d+)\s*$", selected_canteen)
+        canteen_id = canteen_match.group(1) if canteen_match else ""
+        candidate_responses = []
+        parsed_records = []
+
+        def menu_api_loaded(d):
+            nonlocal parsed_records
+            for entry in d.get_log("performance"):
+                try:
+                    event = json.loads(entry["message"])["message"]
+                    params = event.get("params", {})
+                    if event.get("method") != "Network.responseReceived":
+                        continue
+                    response = params.get("response", {})
+                    parsed_url = urlsplit(response.get("url", ""))
+                    if (
+                        parsed_url.hostname == "nv2apigateway.onlinevidyalaya.net"
+                        and parsed_url.path.endswith("/GetCanteenMenuList")
+                        and response.get("status") == 200
+                    ):
+                        candidate_responses.append(params.get("requestId"))
+                except Exception:
+                    continue
+
+            for request_id in list(candidate_responses):
+                try:
+                    body_result = d.execute_cdp_cmd("Network.getResponseBody", {"requestId": request_id})
+                    body = body_result.get("body", "")
+                    if body_result.get("base64Encoded"):
+                        import base64
+                        body = base64.b64decode(body).decode("utf-8", errors="replace")
+                    parsed_records = extract_api_menu_records(json.loads(body), canteen_id, break_name)
+                    if parsed_records:
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        if wait_for_page(driver, 15).until(menu_api_loaded):
+            log(f"Scraped {len(parsed_records)} dated rows from the canteen API for the selected filters.")
+            return parsed_records
+
         try:
             wait_for_page(driver).until(lambda d: any(DATE_RE.search(row.text) for row in d.find_elements(By.CSS_SELECTOR, "#canteenMenu tbody tr")))
         except TimeoutException:
