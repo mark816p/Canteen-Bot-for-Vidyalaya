@@ -3,80 +3,51 @@ name: Test Canteen Notifier (Savya Only)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   scrape-and-notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install Python dependencies
         working-directory: github_actions
         run: pip install -r requirements.txt
 
-      - name: Run Scraper
+      - name: Scrape Savya menu
         env:
           VIDYALAYA_USERNAME: ${{ secrets.VIDYALAYA_USERNAME }}
           VIDYALAYA_PASSWORD: ${{ secrets.VIDYALAYA_PASSWORD }}
+          ENABLE_WHATSAPP: '1'
+          SCRAPER_STRICT: '1'
         run: python github_actions/scraper.py
 
-      - name: Setup Go
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
-      - name: Install Go Dependencies
+      - name: Send menu to Savya groups
+        if: ${{ hashFiles('github_actions/message_to_send.txt') != '' }}
         working-directory: github_actions/wa_sender
-        run: go mod tidy
-
-      - name: Restore WhatsApp Session Cache
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/whatsapp_session.db
-          key: whatsapp-session-${{ github.run_id }}
-          restore-keys: |
-            whatsapp-session-
-
-      - name: Send WhatsApp Message (Test - Savya Only)
-        working-directory: github_actions
         env:
-          PART1: ${{ secrets.WHATSAPP_SESSION_PART1 }}
-          PART2: ${{ secrets.WHATSAPP_SESSION_PART2 }}
-        run: |
-          if [ ! -f message_to_send.txt ]; then
-            echo "No message to send (holiday or no menu found). Skipping."
-            exit 0
-          fi
-          
-          # Reconstruct the session database only if not already restored from cache
-          python -c "
-          import os, base64, gzip, sys
-          if os.path.exists('/tmp/whatsapp_session.db') and os.path.getsize('/tmp/whatsapp_session.db') > 1000:
-              print('Using cached session database.')
-              sys.exit(0)
-          print('No cached session DB found. Reconstructing from secrets...')
-          try:
-              b = base64.b64decode(os.environ['PART1'] + os.environ['PART2'])
-              with open('/tmp/whatsapp_session.db', 'wb') as f:
-                  f.write(gzip.decompress(b))
-              print('Extracted session DB successfully.')
-          except Exception as e:
-              print('Extraction Failed:', e)
-              sys.exit(1)
-          "
-          
-          # Run the custom Go WhatsApp Sender we built
-          cd wa_sender
-          CGO_ENABLED=1 go run main.go test
+          WA_SESSION_KEY: ${{ secrets.WA_SESSION_KEY }}
+          WA_SESSION_ENC_PART001: ${{ secrets.WA_SESSION_ENC_PART001 }}
+          WA_SESSION_ENC_PART002: ${{ secrets.WA_SESSION_ENC_PART002 }}
+          WA_SESSION_ENC_PART003: ${{ secrets.WA_SESSION_ENC_PART003 }}
+          WA_SESSION_ENC_PART004: ${{ secrets.WA_SESSION_ENC_PART004 }}
+          WA_SESSION_ENC_PART005: ${{ secrets.WA_SESSION_ENC_PART005 }}
+          WA_GROUP_JIDS: ${{ secrets.WA_GROUP_JIDS }}
+        run: go run ./cmd/notifier send --session-enc /tmp/canteen-session.db.enc --message-file ../message_to_send.txt
 
-      - name: Save Updated WhatsApp Session Cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: /tmp/whatsapp_session.db
-          key: whatsapp-session-${{ github.run_id }}
+      - name: Run sender unit tests
+        working-directory: github_actions/wa_sender
+        run: go test ./...
