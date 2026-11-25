@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from selenium import webdriver
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+from selenium.common.exceptions import ElementClickInterceptedException, StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -68,10 +68,19 @@ def first_present(driver: webdriver.Chrome, selectors: list[tuple[str, str]], ti
         raise last_error
     raise TimeoutException("No selectors were provided.")
 
+def wait_for_portal_overlay(driver: webdriver.Chrome, timeout: int = 30) -> None:
+    def overlay_gone(d):
+        return not any(
+            element.is_displayed()
+            for element in d.find_elements(By.CSS_SELECTOR, ".ngx-spinner-overlay")
+        )
+    wait_for_page(driver, timeout).until(overlay_gone)
+
 def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], visible_text: str) -> None:
     for attempt in range(5):
         try:
             wait_for_document_ready(driver)
+            wait_for_portal_overlay(driver)
             element = first_present(driver, selectors)
             dropdown = Select(element)
             option_texts = [option.text.strip() for option in dropdown.options]
@@ -81,8 +90,9 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             # select is opened. Selecting the canteen itself uses its real item.
             if len(option_texts) <= 1 or not any(visible_text.casefold() in text.casefold() for text in option_texts):
                 try:
+                    wait_for_portal_overlay(driver)
                     element.click()
-                except StaleElementReferenceException:
+                except (ElementClickInterceptedException, StaleElementReferenceException):
                     # Opening a filter can replace its DOM node. The wait
                     # below reads fresh elements on every poll.
                     log(f"Portal refreshed the {visible_text!r} filter while opening it.")
@@ -105,6 +115,7 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
                 element = first_present(driver, selectors)
                 dropdown = Select(element)
             try:
+                wait_for_portal_overlay(driver)
                 dropdown.select_by_visible_text(visible_text)
                 log(f"Selected {visible_text!r}: {dropdown.first_selected_option.text.strip()!r}.")
                 return
