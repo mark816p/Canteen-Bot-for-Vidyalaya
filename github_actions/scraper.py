@@ -2,7 +2,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from selenium import webdriver
@@ -14,8 +14,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
 BASE_DIR = Path(__file__).resolve().parent
-MENU_URL = "https://nhss.onlinevidyalaya.net/Pages/StudentManagement/CanteenMenu.aspx"
-LOGIN_URL_PART = "/Pages/BaseFramework/Security/Login.aspx"
+MENU_URL = "https://nhss.onlinevidyalaya.net/MyCommunication/CanteenMenu"
+LOGIN_URL_PART = "/login"
 DATE_RE = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
 
 def log(message: str) -> None:
@@ -70,6 +70,7 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             wait_for_document_ready(driver)
             element = first_present(driver, selectors)
             dropdown = Select(element)
+            wait_for_page(driver).until(lambda _: len(dropdown.options) > 1)
             try:
                 dropdown.select_by_visible_text(visible_text)
                 return
@@ -95,19 +96,16 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             time.sleep(2)
 
 def login_if_needed(driver: webdriver.Chrome) -> None:
-    if LOGIN_URL_PART not in driver.current_url and driver.title.casefold() != "login":
+    username_fields = driver.find_elements(By.CSS_SELECTOR, "input[formcontrolname='username']")
+    if LOGIN_URL_PART not in driver.current_url.casefold() and not username_fields:
         return
 
     log("Login page detected.")
     wait = wait_for_page(driver, 30)
-    wait.until(EC.presence_of_element_located((By.ID, "userNameTextBox"))).send_keys(os.environ["VIDYALAYA_USERNAME"])
-    driver.find_element(By.ID, "passwordTextBox").send_keys(os.environ["VIDYALAYA_PASSWORD"])
-
-    remember_boxes = driver.find_elements(By.ID, "chkRememberMe")
-    if remember_boxes and not remember_boxes[0].is_selected():
-        remember_boxes[0].click()
-
-    driver.find_element(By.ID, "loginButton").click()
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='username']"))).send_keys(os.environ["VIDYALAYA_USERNAME"])
+    driver.find_element(By.CSS_SELECTOR, "input[formcontrolname='password']").send_keys(os.environ["VIDYALAYA_PASSWORD"])
+    sign_in = driver.find_elements(By.XPATH, "//button[normalize-space()='Sign In']")
+    (sign_in[0] if sign_in else driver.find_element(By.CSS_SELECTOR, "button[type='submit']")).click()
     wait.until(lambda d: LOGIN_URL_PART not in d.current_url)
 
 def wait_for_document_ready(driver: webdriver.Chrome, timeout: int = 15) -> None:
@@ -115,8 +113,8 @@ def wait_for_document_ready(driver: webdriver.Chrome, timeout: int = 15) -> None
 
 def click_search(driver: webdriver.Chrome) -> None:
     locators = [
-        (By.ID, "ctl00_CP_SearchButton"),
-        (By.CSS_SELECTOR, "input[type='submit'][value*='Search'], button[id*='Search']"),
+        (By.ID, "Search"),
+        (By.CSS_SELECTOR, "button[id*='Search']"),
     ]
     for _ in range(3):
         wait_for_document_ready(driver)
@@ -133,7 +131,7 @@ def click_search(driver: webdriver.Chrome) -> None:
     log("Search button was not found.")
 
 def extract_from_grid(driver: webdriver.Chrome) -> list[dict[str, str]]:
-    tables = driver.find_elements(By.CSS_SELECTOR, "#ctl00_CP_FoodItemMasterGridView, table[id*='FoodItem'], table[id*='Menu'], table")
+    tables = driver.find_elements(By.CSS_SELECTOR, "#canteenMenu, table[id*='FoodItem'], table[id*='Menu'], table")
     records = []
 
     for table in tables:
@@ -146,6 +144,16 @@ def extract_from_grid(driver: webdriver.Chrome) -> list[dict[str, str]]:
             row_text = row.text.strip()
             date_match = DATE_RE.search(row_text)
             if not date_match:
+                continue
+
+            if table.get_attribute("id") == "canteenMenu":
+                item_cell = cells[-1]
+                fields = item_cell.find_elements(By.CSS_SELECTOR, "textarea, input")
+                food_text = next((field.get_attribute("value") or field.get_attribute("innerText") or "" for field in fields if field.get_attribute("value") or field.get_attribute("innerText")), "")
+                if not food_text:
+                    food_text = item_cell.text
+                if food_text.strip():
+                    records.append({"date": normalize_date(cells[0].text), "food": format_food(food_text)})
                 continue
 
             food_text = ""
@@ -201,12 +209,12 @@ def scrape_menu() -> list[dict[str, str]]:
         login_if_needed(driver)
         driver.get(MENU_URL)
 
-        select_dropdown(driver, [(By.ID, "ctl00_CP_SelectCanteenDropDownList"), (By.CSS_SELECTOR, "select[id*='Canteen']")], canteen_name)
+        select_dropdown(driver, [(By.ID, "selectcanteen"), (By.CSS_SELECTOR, "select[id*='canteen']")], canteen_name)
         time.sleep(1)
-        select_dropdown(driver, [(By.ID, "ctl00_CP_BreakTypeDropDownList"), (By.CSS_SELECTOR, "select[id*='Break']")], break_name)
+        select_dropdown(driver, [(By.ID, "breaktype"), (By.CSS_SELECTOR, "select[id*='break']")], break_name)
 
         click_search(driver)
-        time.sleep(2)
+        wait_for_page(driver).until(lambda d: any(DATE_RE.search(row.text) for row in d.find_elements(By.CSS_SELECTOR, "#canteenMenu tbody tr")))
         
         records = extract_from_grid(driver)
         if not records:
@@ -229,7 +237,8 @@ def build_message(record: dict) -> str:
 {record["food"]}"""
 
 def main():
-    target_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    ist = timezone(timedelta(hours=5, minutes=30))
+    target_date = (datetime.now(ist) + timedelta(days=1)).strftime("%Y-%m-%d")
     log(f"Target Date for GitHub Actions: {target_date}")
     
     try:
