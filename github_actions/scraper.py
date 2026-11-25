@@ -78,16 +78,32 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             # they receive keyboard focus. Clicking a native select in headless
             # Chrome opens its popup but does not trigger the portal's loader.
             if len(option_texts) <= 1 or not any(visible_text.casefold() in text.casefold() for text in option_texts):
-                element.click()
-                element.send_keys(Keys.ARROW_DOWN)
+                try:
+                    element.click()
+                except StaleElementReferenceException:
+                    # The portal can replace the select as soon as it opens.
+                    log(f"Portal replaced the {visible_text!r} filter while opening it; reacquiring the control.")
+                try:
+                    element = first_present(driver, selectors, timeout=10)
+                    element.send_keys(Keys.ARROW_DOWN)
+                except StaleElementReferenceException:
+                    # Selecting the first available item can itself re-render
+                    # the control. The wait below always reads a fresh element.
+                    log(f"Portal replaced the {visible_text!r} filter while loading its options.")
 
                 def options_ready(d):
-                    current = first_present(d, selectors, timeout=2)
-                    current_select = Select(current)
-                    texts = [option.text.strip() for option in current_select.options]
-                    selected = current_select.first_selected_option.text.strip()
                     wanted = visible_text.casefold()
-                    return wanted in selected.casefold() or any(wanted in text.casefold() for text in texts)
+                    for by, selector in selectors:
+                        for current in d.find_elements(by, selector):
+                            try:
+                                current_select = Select(current)
+                                texts = [option.text.strip() for option in current_select.options]
+                                selected = current_select.first_selected_option.text.strip()
+                                if wanted in selected.casefold() or any(wanted in text.casefold() for text in texts):
+                                    return True
+                            except StaleElementReferenceException:
+                                continue
+                    return False
 
                 wait_for_page(driver, 30).until(options_ready)
                 element = first_present(driver, selectors)
@@ -112,6 +128,14 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
                 raise RuntimeError(f"Could not select {visible_text!r}. Available options: {options}")
         except (StaleElementReferenceException, TimeoutException) as exc:
             if attempt == 4:
+                select_states = driver.execute_script("""
+                    return Array.from(document.querySelectorAll('select')).map((select) => ({
+                        id: select.id,
+                        value: select.value,
+                        options: Array.from(select.options).map((option) => option.text.trim())
+                    }));
+                """)
+                log(f"Dropdown diagnostic at {driver.current_url}: {select_states}")
                 raise exc
             log(f"Retrying dropdown selection for {visible_text!r} after {type(exc).__name__} (attempt {attempt + 1}/5)...")
             time.sleep(2)
