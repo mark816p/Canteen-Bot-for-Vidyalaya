@@ -106,6 +106,7 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
                 dropdown = Select(element)
             try:
                 dropdown.select_by_visible_text(visible_text)
+                log(f"Selected {visible_text!r}: {dropdown.first_selected_option.text.strip()!r}.")
                 return
             except (StaleElementReferenceException, TimeoutException):
                 raise
@@ -114,11 +115,13 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
                 for option in dropdown.options:
                     if wanted in option.text.casefold():
                         dropdown.select_by_visible_text(option.text)
+                        log(f"Selected {visible_text!r}: {dropdown.first_selected_option.text.strip()!r}.")
                         return
                 real_options = [option.text.strip() for option in dropdown.options if option.text.strip() and "select" not in option.text.casefold()]
                 if len(real_options) == 1:
                     log(f"Using the only available dropdown option: {real_options[0]}")
                     dropdown.select_by_visible_text(real_options[0])
+                    log(f"Selected {visible_text!r}: {dropdown.first_selected_option.text.strip()!r}.")
                     return
                 options = ", ".join(option.text.strip() for option in dropdown.options if option.text.strip())
                 raise RuntimeError(f"Could not select {visible_text!r}. Available options: {options}")
@@ -367,7 +370,29 @@ def scrape_menu() -> list[dict[str, str]]:
         select_dropdown(driver, [(By.ID, "breaktype"), (By.CSS_SELECTOR, "select[id*='break']")], break_name)
 
         click_search(driver)
-        wait_for_page(driver).until(lambda d: any(DATE_RE.search(row.text) for row in d.find_elements(By.CSS_SELECTOR, "#canteenMenu tbody tr")))
+        try:
+            wait_for_page(driver).until(lambda d: any(DATE_RE.search(row.text) for row in d.find_elements(By.CSS_SELECTOR, "#canteenMenu tbody tr")))
+        except TimeoutException:
+            diagnostic = driver.execute_script("""
+                const table = document.querySelector('#canteenMenu');
+                return {
+                    url: location.href,
+                    filters: Array.from(document.querySelectorAll('select')).map((e) => ({
+                        id: e.id,
+                        value: e.value,
+                        selected: e.selectedOptions?.[0]?.textContent?.trim(),
+                        options: Array.from(e.options).map((o) => o.text.trim())
+                    })),
+                    tableFound: !!table,
+                    headers: table ? Array.from(table.querySelectorAll('thead th')).map((e) => e.innerText.trim()) : [],
+                    rowCount: table ? table.querySelectorAll('tbody tr').length : 0,
+                    firstRows: table ? Array.from(table.querySelectorAll('tbody tr')).slice(0, 3).map((r) => r.innerText.trim()) : [],
+                    alerts: Array.from(document.querySelectorAll('[role="alert"], .alert, .validation-summary-errors'))
+                        .map((e) => e.innerText.trim()).filter(Boolean)
+                };
+            """)
+            log(f"Menu results did not load after search. Diagnostic: {diagnostic}")
+            raise
         
         records = extract_from_grid(driver)
         if not records:
