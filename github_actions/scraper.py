@@ -16,6 +16,7 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 
 BASE_DIR = Path(__file__).resolve().parent
 MENU_URL = "https://nhss.onlinevidyalaya.net/MyCommunication/CanteenMenu"
+LOGIN_URL = "https://nhss.onlinevidyalaya.net/login?orgGroupId=1965"
 LOGIN_URL_PART = "/login"
 DATE_RE = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
 
@@ -249,11 +250,11 @@ def scrape_menu() -> list[dict[str, str]]:
     break_name = os.environ.get("VIDYALAYA_BREAK", "Lunch Break")
     try:
         log("Opening Vidyalaya canteen menu in Chrome.")
-        driver.get(MENU_URL)
+        # A clean GitHub runner has no portal session. Start at the portal's
+        # login route so its menu shell cannot be mistaken for authentication.
+        driver.get(LOGIN_URL)
         login_if_needed(driver)
         driver.get(MENU_URL)
-        # The portal can briefly render its menu shell before redirecting an
-        # unauthenticated browser to /login. Check again after the navigation.
         login_if_needed(driver)
         log(f"Canteen page loaded at {driver.current_url}.")
 
