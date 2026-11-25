@@ -184,6 +184,7 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
                 formControlName: element.getAttribute('formcontrolname'),
                 placeholder: element.getAttribute('placeholder'),
                 autocomplete: element.getAttribute('autocomplete'),
+                hasValue: Boolean(element.value),
                 text: element.innerText.trim(),
                 disabled: element.disabled
             });
@@ -191,6 +192,7 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
                 url: location.href,
                 inputs: Array.from(document.querySelectorAll('input')).filter((e) => e.offsetParent !== null).map(describe),
                 buttons: Array.from(document.querySelectorAll('button')).filter((e) => e.offsetParent !== null).map(describe),
+                forms: Array.from(document.forms).map((form) => ({ action: form.action, valid: form.checkValidity() })),
                 validation: Array.from(document.querySelectorAll('.alert, .invalid-feedback, [role="alert"]'))
                     .filter((element) => element.innerText.trim())
                     .map((element) => element.innerText.trim())
