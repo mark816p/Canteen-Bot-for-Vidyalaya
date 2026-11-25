@@ -1,7 +1,9 @@
 # WhatsApp sender CLI
 
 This folder contains the encrypted-session sender merged from `WhatsApp-Group-Notifier`.
-It supports local `pair` and `groups` commands and a group-only `send` command. Pairing is
+It supports local `pair` and `groups` commands and a group-only `send` command. `send` accepts
+`WA_GROUP_JIDS` as a comma- or newline-separated list, so one run can target multiple groups.
+Pairing is
 blocked in CI, and the session database is encrypted with AES-256-GCM at rest.
 
 The canteen workflows currently run the scraper without WhatsApp. They must not restore or

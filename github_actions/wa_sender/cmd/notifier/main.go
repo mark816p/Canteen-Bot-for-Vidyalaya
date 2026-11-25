@@ -50,11 +50,12 @@ func usage() {
 Commands:
   pair     Pair a WhatsApp account via QR code locally and save an encrypted session
   groups   List joined WhatsApp groups and their @g.us JIDs
-  send     Send a message to the configured WhatsApp group and re-encrypt the session
+  send     Send a message to the configured WhatsApp group(s) and re-encrypt the session
 
 Environment variables:
   WA_SESSION_KEY   Required 256-bit encryption key (64 hex chars or 44-char base64)
   WA_GROUP_JID     Target WhatsApp group JID (e.g. 120363012345678901@g.us)
+  WA_GROUP_JIDS    Comma- or newline-separated target group JIDs (preferred for multiple groups)
   WA_MESSAGE       Message body (alternative to --message or --message-file)
   WA_LOG_LEVEL     whatsmeow log level: ERROR, WARN (default), INFO, DEBUG`)
 }
@@ -130,13 +131,41 @@ func runSend(args []string) error {
 
 	// Always save updated SQLite state even if send fails after connecting/key-sync.
 	return withEncryptedSession(*sessionEnc, key, false, true, func(ctx context.Context, client *wa.Store) error {
-		resp, err := client.SendGroupMessage(ctx, *groupJID, body)
-		if err != nil {
-			return err
+		groupSpec := strings.TrimSpace(*groupJID)
+		if multi := strings.TrimSpace(os.Getenv("WA_GROUP_JIDS")); multi != "" {
+			groupSpec = multi
 		}
-		fmt.Printf("Message sent to group (ID=%s, timestamp=%s)\n", resp.ID, resp.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
+		groups := splitGroupJIDs(groupSpec)
+		if len(groups) == 0 {
+			return errors.New("no target group provided (use WA_GROUP_JIDS or WA_GROUP_JID)")
+		}
+		for _, target := range groups {
+			resp, sendErr := client.SendGroupMessage(ctx, target, body)
+			if sendErr != nil {
+				return sendErr
+			}
+			fmt.Printf("Message sent to group %s (ID=%s, timestamp=%s)\n", target, resp.ID, resp.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
+		}
 		return nil
 	})
+}
+
+func splitGroupJIDs(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' })
+	groups := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		group := strings.TrimSpace(part)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		groups = append(groups, group)
+	}
+	return groups
 }
 
 func resolveMessage(flagMsg, filePath string) (string, error) {
