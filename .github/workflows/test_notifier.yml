@@ -45,7 +45,8 @@ jobs:
           WA_SESSION_ENC_PART003: ${{ secrets.WA_SESSION_ENC_PART003 }}
           WA_SESSION_ENC_PART004: ${{ secrets.WA_SESSION_ENC_PART004 }}
           WA_SESSION_ENC_PART005: ${{ secrets.WA_SESSION_ENC_PART005 }}
-          WA_GROUP_JIDS: ${{ secrets.WA_GROUP_JIDS }}
+          # Savya-only test destination. The daily workflow uses the two-group secret.
+          WA_GROUP_JIDS: 120363370008112217@g.us
         run: go run ./cmd/notifier send --session-enc /tmp/canteen-session.db.enc --message-file ../message_to_send.txt
 
       - name: Run sender unit tests
