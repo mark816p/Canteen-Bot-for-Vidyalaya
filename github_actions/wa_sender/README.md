@@ -3,6 +3,8 @@
 This folder contains the encrypted-session sender merged from `WhatsApp-Group-Notifier`.
 It supports local `pair` and `groups` commands and a group-only `send` command. `send` accepts
 `WA_GROUP_JIDS` as a comma- or newline-separated list, so one run can target multiple groups.
+CI can reconstruct the encrypted session from `WA_SESSION_ENC`, or from
+`WA_SESSION_ENC_PART1`, `WA_SESSION_ENC_PART2`, and `WA_SESSION_ENC_PART3`.
 Pairing is
 blocked in CI, and the session database is encrypted with AES-256-GCM at rest.
 

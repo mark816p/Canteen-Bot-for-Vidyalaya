@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -196,6 +197,9 @@ func withEncryptedSession(
 	fn func(ctx context.Context, client *wa.Store) error,
 ) error {
 	ctx := context.Background()
+	if err := materializeEncryptedSession(encPath); err != nil {
+		return err
+	}
 
 	tempDB, cleanup, err := crypto.DecryptToTemp(encPath, key, allowMissing)
 	if err != nil {
@@ -220,4 +224,33 @@ func withEncryptedSession(
 	}
 
 	return errors.Join(fnErr, closeErr, saveErr)
+}
+
+// materializeEncryptedSession reconstructs the encrypted session from CI secrets
+// when the workflow did not provide a file directly. It never logs the secret.
+func materializeEncryptedSession(encPath string) error {
+	if _, err := os.Stat(encPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect encrypted session: %w", err)
+	}
+
+	raw := strings.TrimSpace(os.Getenv("WA_SESSION_ENC"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("WA_SESSION_ENC_PART1")) +
+			strings.TrimSpace(os.Getenv("WA_SESSION_ENC_PART2")) +
+			strings.TrimSpace(os.Getenv("WA_SESSION_ENC_PART3"))
+	}
+	if raw == "" {
+		return nil
+	}
+
+	blob, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return fmt.Errorf("decode encrypted session secret: %w", err)
+	}
+	if err := os.WriteFile(encPath, blob, 0o600); err != nil {
+		return fmt.Errorf("write encrypted session from secrets: %w", err)
+	}
+	return nil
 }
