@@ -8,6 +8,7 @@ from pathlib import Path
 from selenium import webdriver
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.support import expected_conditions as EC
@@ -70,9 +71,28 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             wait_for_document_ready(driver)
             element = first_present(driver, selectors)
             dropdown = Select(element)
-            if len(dropdown.options) <= 1:
+            option_texts = [option.text.strip() for option in dropdown.options]
+            log(f"Dropdown options for {visible_text!r}: {option_texts}")
+
+            # This portal lazily populates the canteen and break controls after
+            # they receive keyboard focus. Clicking a native select in headless
+            # Chrome opens its popup but does not trigger the portal's loader.
+            if len(option_texts) <= 1 or not any(visible_text.casefold() in text.casefold() for text in option_texts):
                 element.click()
-                wait_for_page(driver).until(lambda _: len(dropdown.options) > 1)
+                element.send_keys(Keys.ARROWDOWN)
+                element.send_keys(Keys.ENTER)
+
+                def options_ready(d):
+                    current = first_present(d, selectors, timeout=2)
+                    current_select = Select(current)
+                    texts = [option.text.strip() for option in current_select.options]
+                    selected = current_select.first_selected_option.text.strip()
+                    wanted = visible_text.casefold()
+                    return len(texts) > 1 or wanted in selected.casefold() or any(wanted in text.casefold() for text in texts)
+
+                wait_for_page(driver, 20).until(options_ready)
+                element = first_present(driver, selectors)
+                dropdown = Select(element)
             try:
                 dropdown.select_by_visible_text(visible_text)
                 return
