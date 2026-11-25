@@ -75,16 +75,10 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             log(f"Dropdown options for {visible_text!r}: {option_texts}")
 
             # This portal lazily populates the canteen and break controls after
-            # they receive keyboard focus. Clicking a native select in headless
-            # Chrome opens its popup but does not trigger the portal's loader.
+            # they receive keyboard focus. Sending Arrow Down directly changes
+            # the selection and triggers the portal's loader in headless Chrome.
             if len(option_texts) <= 1 or not any(visible_text.casefold() in text.casefold() for text in option_texts):
                 try:
-                    element.click()
-                except StaleElementReferenceException:
-                    # The portal can replace the select as soon as it opens.
-                    log(f"Portal replaced the {visible_text!r} filter while opening it; reacquiring the control.")
-                try:
-                    element = first_present(driver, selectors, timeout=10)
                     element.send_keys(Keys.ARROW_DOWN)
                 except StaleElementReferenceException:
                     # Selecting the first available item can itself re-render
