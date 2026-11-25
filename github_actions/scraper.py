@@ -158,6 +158,8 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
         (By.CSS_SELECTOR, "input[autocomplete='username']"),
         (By.CSS_SELECTOR, "input[name*='user']"),
         (By.CSS_SELECTOR, "input[id*='user']"),
+        (By.CSS_SELECTOR, "input[placeholder*='Username']"),
+        (By.CSS_SELECTOR, "input:not([type])"),
         (By.CSS_SELECTOR, "input[type='text']"),
     ]))
     password = wait.until(lambda _: visible_login_field([
@@ -167,9 +169,19 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
     ]))
     username.send_keys(os.environ["VIDYALAYA_USERNAME"])
     password.send_keys(os.environ["VIDYALAYA_PASSWORD"])
+    log("Submitting portal sign-in form.")
     sign_in = driver.find_elements(By.XPATH, "//button[normalize-space()='Sign In']")
     (sign_in[0] if sign_in else driver.find_element(By.CSS_SELECTOR, "button[type='submit']")).click()
-    wait.until(lambda d: LOGIN_URL_PART not in d.current_url)
+    try:
+        wait.until(lambda d: LOGIN_URL_PART not in d.current_url.casefold())
+    except TimeoutException:
+        error_text = driver.execute_script("""
+            return Array.from(document.querySelectorAll('.alert, .invalid-feedback, [role="alert"]'))
+                .filter((element) => element.innerText.trim())
+                .map((element) => element.innerText.trim());
+        """)
+        log(f"Portal sign-in did not leave the login route. Visible validation: {error_text}")
+        raise
 
 def wait_for_document_ready(driver: webdriver.Chrome, timeout: int = 15) -> None:
     wait_for_page(driver, timeout).until(lambda d: d.execute_script("return document.readyState") == "complete")
