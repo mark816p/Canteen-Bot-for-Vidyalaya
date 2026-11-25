@@ -80,7 +80,6 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
             if len(option_texts) <= 1 or not any(visible_text.casefold() in text.casefold() for text in option_texts):
                 element.click()
                 element.send_keys(Keys.ARROW_DOWN)
-                element.send_keys(Keys.ENTER)
 
                 def options_ready(d):
                     current = first_present(d, selectors, timeout=2)
@@ -88,9 +87,9 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
                     texts = [option.text.strip() for option in current_select.options]
                     selected = current_select.first_selected_option.text.strip()
                     wanted = visible_text.casefold()
-                    return len(texts) > 1 or wanted in selected.casefold() or any(wanted in text.casefold() for text in texts)
+                    return wanted in selected.casefold() or any(wanted in text.casefold() for text in texts)
 
-                wait_for_page(driver, 20).until(options_ready)
+                wait_for_page(driver, 30).until(options_ready)
                 element = first_present(driver, selectors)
                 dropdown = Select(element)
             try:
@@ -114,7 +113,7 @@ def select_dropdown(driver: webdriver.Chrome, selectors: list[tuple[str, str]], 
         except (StaleElementReferenceException, TimeoutException) as exc:
             if attempt == 4:
                 raise exc
-            log(f"Retrying dropdown selection for {visible_text!r} due to stale element or timeout (attempt {attempt + 1}/5)...")
+            log(f"Retrying dropdown selection for {visible_text!r} after {type(exc).__name__} (attempt {attempt + 1}/5)...")
             time.sleep(2)
 
 def login_if_needed(driver: webdriver.Chrome) -> None:
