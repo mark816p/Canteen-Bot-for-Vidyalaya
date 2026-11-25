@@ -1,0 +1,15 @@
+# Never commit plaintext or encrypted WhatsApp session files
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.enc
+*.enc.tmp
+
+# Local environment and build outputs
+.env
+.env.*
+/notifier
+/notifier.exe
+bin/
+dist/

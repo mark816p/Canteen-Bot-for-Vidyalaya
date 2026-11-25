@@ -2,8 +2,10 @@ import os
 import re
 import sys
 import time
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from selenium import webdriver
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
@@ -47,6 +49,7 @@ def build_chrome_driver() -> webdriver.Chrome:
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
     options.add_argument("--window-size=1366,900")
+    options.set_capability("goog:loggingPrefs", {"performance": "ALL", "browser": "ALL"})
     # In GitHub actions, chromedriver is already in PATH
     return webdriver.Chrome(options=options)
 
@@ -199,6 +202,29 @@ def login_if_needed(driver: webdriver.Chrome) -> None:
             };
         """)
         log(f"Portal sign-in did not leave the login route. Control diagnostic: {login_state}")
+        network = []
+        request_paths = {}
+        for entry in driver.get_log("performance"):
+            try:
+                event = json.loads(entry["message"])["message"]
+                params = event.get("params", {})
+                if event.get("method") == "Network.requestWillBeSent":
+                    request = params.get("request", {})
+                    parsed = urlsplit(request.get("url", ""))
+                    if parsed.hostname and parsed.hostname.endswith("onlinevidyalaya.net"):
+                        request_paths[params.get("requestId")] = {"host": parsed.hostname, "path": parsed.path, "method": request.get("method")}
+                elif event.get("method") == "Network.responseReceived":
+                    response = params.get("response", {})
+                    parsed = urlsplit(response.get("url", ""))
+                    if parsed.hostname and parsed.hostname.endswith("onlinevidyalaya.net"):
+                        network.append({"host": parsed.hostname, "path": parsed.path, "status": response.get("status"), "type": params.get("type")})
+                elif event.get("method") == "Network.loadingFailed":
+                    path = request_paths.get(params.get("requestId"))
+                    if path:
+                        network.append({**path, "error": params.get("errorText"), "blockedReason": params.get("blockedReason")})
+            except (KeyError, TypeError, ValueError):
+                continue
+        log(f"Portal network responses during sign-in: {network[-20:]}")
         raise
 
 def wait_for_document_ready(driver: webdriver.Chrome, timeout: int = 15) -> None:
@@ -337,16 +363,23 @@ def main():
     target_date = (datetime.now(ist) + timedelta(days=1)).strftime("%Y-%m-%d")
     log(f"Target Date for GitHub Actions: {target_date}")
     
+    strict = os.environ.get("SCRAPER_STRICT") == "1" or "test" in os.environ.get("GITHUB_WORKFLOW", "").casefold()
     try:
         records = scrape_menu()
     except Exception as exc:
-        log(f"Menu scrape failed ({type(exc).__name__}: {exc}). Sending the 'Not Updated Yet' fallback.")
+        log(f"Menu scrape failed ({type(exc).__name__}: {exc}).")
+        if strict:
+            return 1
+        log("Proceeding with the 'Not Updated Yet' fallback.")
         records = []
     record = next((r for r in records if r["date"] == target_date), None)
     
     if not record:
         available = ", ".join(r["date"] for r in records)
         log(f"No menu was found for {target_date}. Available scraped dates: {available}")
+        if strict:
+            log("Strict scraper check failed: target menu row was not found.")
+            return 1
         log("Proceeding with 'Not Updated Yet' message.")
         record = {"date": target_date, "food": "1) Not Updated Yet"}
     else:
@@ -365,4 +398,4 @@ def main():
         log("Scraper-only mode: WhatsApp output is disabled.")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
