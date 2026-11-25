@@ -232,7 +232,11 @@ def main():
     target_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     log(f"Target Date for GitHub Actions: {target_date}")
     
-    records = scrape_menu()
+    try:
+        records = scrape_menu()
+    except Exception as exc:
+        log(f"Menu scrape failed ({type(exc).__name__}: {exc}). Sending the 'Not Updated Yet' fallback.")
+        records = []
     record = next((r for r in records if r["date"] == target_date), None)
     
     if not record:
