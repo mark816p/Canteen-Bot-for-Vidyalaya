@@ -252,6 +252,9 @@ def scrape_menu() -> list[dict[str, str]]:
         driver.get(MENU_URL)
         login_if_needed(driver)
         driver.get(MENU_URL)
+        # The portal can briefly render its menu shell before redirecting an
+        # unauthenticated browser to /login. Check again after the navigation.
+        login_if_needed(driver)
         log(f"Canteen page loaded at {driver.current_url}.")
 
         select_dropdown(driver, [(By.ID, "selectcanteen"), (By.CSS_SELECTOR, "select[id*='canteen']")], canteen_name)
@@ -298,15 +301,20 @@ def main():
         log(f"No menu was found for {target_date}. Available scraped dates: {available}")
         log("Proceeding with 'Not Updated Yet' message.")
         record = {"date": target_date, "food": "1) Not Updated Yet"}
+    else:
+        log(f"Scraped target menu for {target_date}:\n{record['food']}")
         
     if record["food"].strip().casefold() == "holiday" or "holiday" in record["food"].casefold():
         log(f"{target_date} is marked as HOLIDAY.")
         # Instead of skipping, we just write the holiday message!
 
-    msg = build_message(record)
-    with open("github_actions/message_to_send.txt", "w", encoding="utf-8") as f:
-        f.write(msg)
-    log("Message successfully written to message_to_send.txt")
+    if os.environ.get("ENABLE_WHATSAPP") == "1":
+        msg = build_message(record)
+        with open("github_actions/message_to_send.txt", "w", encoding="utf-8") as f:
+            f.write(msg)
+        log("Message successfully written to message_to_send.txt")
+    else:
+        log("Scraper-only mode: WhatsApp output is disabled.")
 
 if __name__ == "__main__":
     main()
