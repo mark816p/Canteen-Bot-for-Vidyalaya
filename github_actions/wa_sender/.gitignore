@@ -6,9 +6,10 @@
 *.enc
 *.enc.tmp
 
-# Local environment and build outputs
+# Local environment, exported secrets, and build outputs
 .env
 .env.*
+secrets/
 /notifier
 /notifier.exe
 bin/

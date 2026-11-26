@@ -27,6 +27,21 @@ This project automates the retrieval of the Vidyalaya Canteen Menu and sends the
 
 ## Project Structure
 - `autorun.bat`: The entry point script that handles environment setup, execution, and logging.
-- `nss/main.py`: The core Python logic for scraping and sending messages.
+- `nss/main.py`: The core Python logic for scraping and sending messages locally.
 - `nss/.env`: Configuration file (create from `.env.example`).
 - `drivers/`: Contains the Microsoft Edge WebDriver used by Selenium.
+- `github_actions/scraper.py`: GitHub Actions headless Chrome menu scraper.
+- `github_actions/wa_sender/`: Encrypted-session Go WhatsApp sender and QR pairing helper.
+- `.github/workflows/test_notifier.yml`: Manual Savya-only test workflow (`WA_GROUP_JID_SAVYA`).
+- `.github/workflows/daily_notifier.yml`: Daily workflow sending to both groups (`WA_GROUP_JID_NAVRACHANA` and `WA_GROUP_JID_SAVYA`).
+
+## GitHub Actions Setup & WhatsApp Pairing
+
+To pair a WhatsApp account and generate `.txt` files for all required WhatsApp GitHub Secrets (`WA_SESSION_KEY`, `WA_SESSION_ENC_PART001`–`005`, `WA_GROUP_JID_SAVYA`, and `WA_GROUP_JID_NAVRACHANA`), run:
+
+```powershell
+cd github_actions/wa_sender
+python pair_and_export_secrets.py
+```
+
+This displays a QR code in your terminal and writes gitignored `.txt` files into `github_actions/wa_sender/secrets/`. See [github_actions/wa_sender/README.md](github_actions/wa_sender/README.md) for full details.
