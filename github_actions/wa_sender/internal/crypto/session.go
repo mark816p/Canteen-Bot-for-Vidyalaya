@@ -164,7 +164,7 @@ func DecryptToTemp(encPath string, key []byte, allowMissing bool) (string, func(
 
 	cleanup := func() {
 		for _, p := range []string{tempPath, tempPath + "-wal", tempPath + "-shm", tempPath + "-journal"} {
-			shredAndRemove(p)
+			ShredAndRemove(p)
 		}
 	}
 
@@ -184,11 +184,11 @@ func DecryptToTemp(encPath string, key []byte, allowMissing bool) (string, func(
 	}
 
 	if err := os.WriteFile(tempPath, plaintext, 0o600); err != nil {
-		zeroBytes(plaintext)
+		ZeroBytes(plaintext)
 		cleanup()
 		return "", nil, fmt.Errorf("write temp session DB: %w", err)
 	}
-	zeroBytes(plaintext)
+	ZeroBytes(plaintext)
 
 	return tempPath, cleanup, nil
 }
@@ -199,7 +199,7 @@ func EncryptFromFile(plainPath, encPath string, key []byte) error {
 	if err != nil {
 		return fmt.Errorf("read plaintext session DB: %w", err)
 	}
-	defer zeroBytes(plaintext)
+	defer ZeroBytes(plaintext)
 
 	blob, err := EncryptBytes(plaintext, key)
 	if err != nil {
@@ -223,7 +223,8 @@ func EncryptFromFile(plainPath, encPath string, key []byte) error {
 	return nil
 }
 
-func shredAndRemove(path string) {
+// ShredAndRemove overwrites path with zeros before unlinking it.
+func ShredAndRemove(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return
@@ -248,7 +249,8 @@ func shredAndRemove(path string) {
 	_ = os.Remove(path)
 }
 
-func zeroBytes(b []byte) {
+// ZeroBytes overwrites a byte slice with zeros to reduce key retention in memory.
+func ZeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}

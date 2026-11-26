@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mark816p/Canteen-Bot-for-Vidyalaya/github_actions/wa_sender/internal/crypto"
 	"github.com/mark816p/Canteen-Bot-for-Vidyalaya/github_actions/wa_sender/internal/wa"
@@ -62,11 +63,14 @@ Environment variables:
   WA_GROUP_JID     Target WhatsApp group JID (e.g. 120363012345678901@g.us)
   WA_GROUP_JIDS    Comma- or newline-separated target group JIDs (preferred for multiple groups)
   WA_MESSAGE       Message body (alternative to --message or --message-file)
+  WA_RETRY_WAIT    Duration to stay connected after sending for retry receipts (default 90s)
   WA_LOG_LEVEL     whatsmeow log level: ERROR, WARN (default), INFO, DEBUG`)
 }
 
 func loadKey() ([]byte, error) {
-	return crypto.ParseKey(os.Getenv("WA_SESSION_KEY"))
+	raw := os.Getenv("WA_SESSION_KEY")
+	_ = os.Unsetenv("WA_SESSION_KEY")
+	return crypto.ParseKey(raw)
 }
 
 func runPair(args []string) error {
@@ -80,8 +84,9 @@ func runPair(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer crypto.ZeroBytes(key)
 
-	return withEncryptedSession(*sessionEnc, key, true, true, func(ctx context.Context, client *wa.Store) error {
+	return withEncryptedSession(*sessionEnc, key, true, true, false, func(ctx context.Context, client *wa.Store) error {
 		return client.Pair(ctx)
 	})
 }
@@ -97,8 +102,9 @@ func runGroups(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer crypto.ZeroBytes(key)
 
-	return withEncryptedSession(*sessionEnc, key, false, true, func(ctx context.Context, client *wa.Store) error {
+	return withEncryptedSession(*sessionEnc, key, false, true, false, func(ctx context.Context, client *wa.Store) error {
 		groups, err := client.ListGroups(ctx)
 		if err != nil {
 			return err
@@ -126,6 +132,8 @@ func runCompact(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer crypto.ZeroBytes(key)
+
 	if err := crypto.CompactSessionFile(*input, *output, key); err != nil {
 		return err
 	}
@@ -143,6 +151,8 @@ func runSend(args []string) error {
 	groupJID := fs.String("group", os.Getenv("WA_GROUP_JID"), "target WhatsApp group JID (@g.us)")
 	message := fs.String("message", "", "message text to send")
 	messageFile := fs.String("message-file", "", "path to UTF-8 text file containing message body")
+	purgeKeys := fs.Bool("purge-keys", true, "purge stale Signal sessions and group sender keys before connecting")
+	retryWait := fs.Duration("retry-wait", resolveRetryWait(), "duration to remain connected after sending for retry receipts")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -151,31 +161,46 @@ func runSend(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer crypto.ZeroBytes(key)
 
 	body, err := resolveMessage(*message, *messageFile)
 	if err != nil {
 		return err
 	}
 
-	// Always save updated SQLite state even if send fails after connecting/key-sync.
-	return withEncryptedSession(*sessionEnc, key, false, true, func(ctx context.Context, client *wa.Store) error {
-		groupSpec := strings.TrimSpace(*groupJID)
-		if multi := strings.TrimSpace(os.Getenv("WA_GROUP_JIDS")); multi != "" {
-			groupSpec = multi
-		}
+	// Capture target group spec before unsetting env vars.
+	groupSpec := strings.TrimSpace(*groupJID)
+	if multi := strings.TrimSpace(os.Getenv("WA_GROUP_JIDS")); multi != "" {
+		groupSpec = multi
+	}
+	_ = os.Unsetenv("WA_GROUP_JID")
+	_ = os.Unsetenv("WA_GROUP_JIDS")
+	_ = os.Unsetenv("WA_MESSAGE")
+
+	// Always save updated local SQLite state unless the session was materialized ephemerally from CI secrets.
+	return withEncryptedSession(*sessionEnc, key, false, true, *purgeKeys, func(ctx context.Context, client *wa.Store) error {
 		groups := splitGroupJIDs(groupSpec)
 		if len(groups) == 0 {
 			return errors.New("no target group provided (use WA_GROUP_JIDS or WA_GROUP_JID)")
 		}
-		responses, sendErr := client.SendGroupMessages(ctx, groups, body)
+		responses, sendErr := client.SendGroupMessagesWithRetryWait(ctx, groups, body, *retryWait)
 		if sendErr != nil {
 			return sendErr
 		}
 		for index, resp := range responses {
-			fmt.Printf("Message sent to group %s (ID=%s, timestamp=%s)\n", groups[index], resp.ID, resp.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
+			fmt.Printf("Message sent to target group #%d (ID=%s, timestamp=%s)\n", index+1, resp.ID, resp.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
 		}
 		return nil
 	})
+}
+
+func resolveRetryWait() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("WA_RETRY_WAIT")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d >= 0 {
+			return d
+		}
+	}
+	return wa.DefaultRetryWait
 }
 
 func splitGroupJIDs(raw string) []string {
@@ -221,11 +246,19 @@ func withEncryptedSession(
 	key []byte,
 	allowMissing bool,
 	persistOnClose bool,
+	purgeEphemeralKeys bool,
 	fn func(ctx context.Context, client *wa.Store) error,
 ) error {
 	ctx := context.Background()
-	if err := materializeEncryptedSession(encPath); err != nil {
+	materialized, err := materializeEncryptedSession(encPath)
+	if err != nil {
 		return err
+	}
+	if materialized {
+		// In CI, sessions come from ephemeral secrets; shred the reconstructed file on exit
+		// and do not re-encrypt stale state back onto the runner filesystem.
+		defer crypto.ShredAndRemove(encPath)
+		persistOnClose = false
 	}
 
 	tempDB, cleanup, err := crypto.DecryptToTemp(encPath, key, allowMissing)
@@ -234,7 +267,9 @@ func withEncryptedSession(
 	}
 	defer cleanup()
 
-	client, err := wa.Open(ctx, tempDB, os.Getenv("WA_LOG_LEVEL"))
+	client, err := wa.OpenWithOptions(ctx, tempDB, os.Getenv("WA_LOG_LEVEL"), wa.OpenOptions{
+		PurgeEphemeralKeys: purgeEphemeralKeys,
+	})
 	if err != nil {
 		return err
 	}
@@ -254,21 +289,24 @@ func withEncryptedSession(
 }
 
 // materializeEncryptedSession reconstructs the encrypted session from CI secrets
-// when the workflow did not provide a file directly. It never logs the secret.
-func materializeEncryptedSession(encPath string) error {
+// when the workflow did not provide a file directly. It never logs the secret and
+// unsets the secret environment variables once read. Returns true if a file was written.
+func materializeEncryptedSession(encPath string) (bool, error) {
 	if _, err := os.Stat(encPath); err == nil {
-		return nil
+		return false, nil
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect encrypted session: %w", err)
+		return false, fmt.Errorf("inspect encrypted session: %w", err)
 	}
 
 	raw := strings.TrimSpace(os.Getenv("WA_SESSION_ENC"))
+	_ = os.Unsetenv("WA_SESSION_ENC")
 	if raw == "" {
 		parts := make(map[string]string)
 		for _, item := range os.Environ() {
 			key, value, ok := strings.Cut(item, "=")
 			if ok && strings.HasPrefix(key, "WA_SESSION_ENC_PART") {
 				parts[key] = strings.TrimSpace(value)
+				_ = os.Unsetenv(key)
 			}
 		}
 		keys := make([]string, 0, len(parts))
@@ -283,15 +321,15 @@ func materializeEncryptedSession(encPath string) error {
 		raw = builder.String()
 	}
 	if raw == "" {
-		return nil
+		return false, nil
 	}
 
 	blob, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
-		return fmt.Errorf("decode encrypted session secret: %w", err)
+		return false, fmt.Errorf("decode encrypted session secret: %w", err)
 	}
 	if err := os.WriteFile(encPath, blob, 0o600); err != nil {
-		return fmt.Errorf("write encrypted session from secrets: %w", err)
+		return false, fmt.Errorf("write encrypted session from secrets: %w", err)
 	}
-	return nil
+	return true, nil
 }

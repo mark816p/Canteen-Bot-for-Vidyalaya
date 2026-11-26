@@ -9,8 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  scrape-and-notify:
+  scrape:
     runs-on: ubuntu-latest
+    outputs:
+      has_message: ${{ steps.check_msg.outputs.has_message }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,13 +34,43 @@ jobs:
           SCRAPER_STRICT: '1'
         run: python github_actions/scraper.py
 
+      - name: Check scraped message
+        id: check_msg
+        run: |
+          if [ -s github_actions/message_to_send.txt ]; then
+            echo "has_message=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_message=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload scraped message artifact
+        if: steps.check_msg.outputs.has_message == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canteen-message
+          path: github_actions/message_to_send.txt
+          retention-days: 1
+
+  notify:
+    needs: scrape
+    if: needs.scrape.outputs.has_message == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
 
+      - name: Download scraped message artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: canteen-message
+          path: github_actions
+
       - name: Send menu to WhatsApp groups
-        if: ${{ hashFiles('github_actions/message_to_send.txt') != '' }}
         working-directory: github_actions/wa_sender
         env:
           WA_SESSION_KEY: ${{ secrets.WA_SESSION_KEY }}
@@ -48,4 +80,8 @@ jobs:
           WA_SESSION_ENC_PART004: ${{ secrets.WA_SESSION_ENC_PART004 }}
           WA_SESSION_ENC_PART005: ${{ secrets.WA_SESSION_ENC_PART005 }}
           WA_GROUP_JIDS: ${{ secrets.WA_GROUP_JID_NAVRACHANA }},${{ secrets.WA_GROUP_JID_SAVYA }}
-        run: go run ./cmd/notifier send --session-enc /tmp/canteen-session.db.enc --message-file ../message_to_send.txt
+        run: go run -mod=readonly ./cmd/notifier send --session-enc /tmp/canteen-session.db.enc --message-file ../message_to_send.txt
+
+      - name: Clean up temporary files
+        if: always()
+        run: rm -f /tmp/canteen-session.db.enc github_actions/message_to_send.txt

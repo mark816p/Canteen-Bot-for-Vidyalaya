@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
@@ -22,21 +23,38 @@ import (
 )
 
 const (
-	connectTimeout = 30 * time.Second
-	sendTimeout    = 90 * time.Second // Extra headroom for ~1000-member group sender-key distribution
-	flushDelay     = 2 * time.Second
+	connectTimeout     = 30 * time.Second
+	connectSettleDelay = 5 * time.Second
+	sendTimeout        = 90 * time.Second // Extra headroom for ~1000-member group sender-key distribution
+	flushDelay         = 2 * time.Second
+	DefaultRetryWait   = 90 * time.Second // Window to answer live E2EE retry receipts after sending
 )
+
+// OpenOptions configures optional store initialization behavior.
+type OpenOptions struct {
+	// PurgeEphemeralKeys clears whatsmeow_sessions and whatsmeow_sender_keys before
+	// connecting while preserving whatsmeow_device and whatsmeow_identity_keys.
+	PurgeEphemeralKeys bool
+}
 
 // Store wraps an open whatsmeow client and its underlying SQLite handle so both
 // can be closed cleanly before re-encrypting the session file.
 type Store struct {
-	db     *sql.DB
-	client *whatsmeow.Client
+	db          *sql.DB
+	client      *whatsmeow.Client
+	sentMu      sync.RWMutex
+	sentMsgs    map[types.MessageID]string
+	fallbackMsg string
 }
 
 // Open initializes a whatsmeow client backed by the plaintext SQLite file at dbPath.
 // It uses DELETE journal mode so all state lives in the single .db file prior to encryption.
 func Open(ctx context.Context, dbPath string, logLevel string) (*Store, error) {
+	return OpenWithOptions(ctx, dbPath, logLevel, OpenOptions{})
+}
+
+// OpenWithOptions initializes a whatsmeow client with explicit OpenOptions.
+func OpenWithOptions(ctx context.Context, dbPath string, logLevel string, opts OpenOptions) (*Store, error) {
 	if logLevel == "" {
 		logLevel = "WARN"
 	}
@@ -55,6 +73,13 @@ func Open(ctx context.Context, dbPath string, logLevel string) (*Store, error) {
 		return nil, fmt.Errorf("upgrade session schema: %w", err)
 	}
 
+	if opts.PurgeEphemeralKeys {
+		if err := purgeEphemeralSessionKeys(ctx, db); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
+
 	deviceStore, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		_ = db.Close()
@@ -63,11 +88,42 @@ func Open(ctx context.Context, dbPath string, logLevel string) (*Store, error) {
 
 	clientLog := waLog.Stdout("WA", logLevel, true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
+	client.AutoTrustIdentity = true
+	client.EnableAutoReconnect = true
+	client.UseRetryMessageStore = false
 
-	return &Store{
-		db:     db,
-		client: client,
-	}, nil
+	s := &Store{
+		db:       db,
+		client:   client,
+		sentMsgs: make(map[types.MessageID]string),
+	}
+	client.GetMessageForRetry = func(requester, to types.JID, id types.MessageID) *waE2E.Message {
+		s.sentMu.RLock()
+		text, ok := s.sentMsgs[id]
+		fallback := s.fallbackMsg
+		s.sentMu.RUnlock()
+		if ok {
+			return &waE2E.Message{Conversation: proto.String(text)}
+		}
+		if fallback != "" {
+			return &waE2E.Message{Conversation: proto.String(fallback)}
+		}
+		return nil
+	}
+
+	return s, nil
+}
+
+func purgeEphemeralSessionKeys(ctx context.Context, db *sql.DB) error {
+	// Only wipe ephemeral Signal session ratchets and group sender keys so a static
+	// CI snapshot negotiates fresh keys instead of triggering MAC mismatches.
+	// whatsmeow_device and whatsmeow_identity_keys stay intact to preserve pairing.
+	for _, table := range []string{"whatsmeow_sessions", "whatsmeow_sender_keys"} {
+		if _, err := db.ExecContext(ctx, "DELETE FROM "+table); err != nil {
+			return fmt.Errorf("purge %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // Close disconnects the WhatsApp WebSocket (if connected) and closes the SQLite DB.
@@ -220,8 +276,15 @@ func (s *Store) SendGroupMessage(ctx context.Context, groupJIDStr, text string) 
 }
 
 // SendGroupMessages validates all targets, connects once, and sends to each
-// group over the same WhatsApp connection.
+// group over the same WhatsApp connection, keeping the connection open for DefaultRetryWait.
 func (s *Store) SendGroupMessages(ctx context.Context, groupJIDStrs []string, text string) ([]whatsmeow.SendResponse, error) {
+	return s.SendGroupMessagesWithRetryWait(ctx, groupJIDStrs, text, DefaultRetryWait)
+}
+
+// SendGroupMessagesWithRetryWait validates all targets, connects once, sends to each
+// group over the same WhatsApp connection, and waits retryWait afterwards to fulfill
+// live E2EE retry receipts from recipient devices.
+func (s *Store) SendGroupMessagesWithRetryWait(ctx context.Context, groupJIDStrs []string, text string, retryWait time.Duration) ([]whatsmeow.SendResponse, error) {
 	if len(groupJIDStrs) == 0 {
 		return nil, errors.New("at least one group JID is required")
 	}
@@ -238,7 +301,25 @@ func (s *Store) SendGroupMessages(ctx context.Context, groupJIDStrs []string, te
 		}
 		targets = append(targets, jid)
 	}
+
+	s.sentMu.Lock()
+	s.fallbackMsg = msgText
+	s.sentMu.Unlock()
+
+	var retryCount atomic.Int64
+	handlerID := s.client.AddEventHandler(func(rawEvt interface{}) {
+		if receipt, ok := rawEvt.(*events.Receipt); ok && receipt.Type == types.ReceiptTypeRetry {
+			retryCount.Add(1)
+		}
+	})
+	defer s.client.RemoveEventHandler(handlerID)
+
 	if err := s.connectExisting(ctx); err != nil {
+		return nil, err
+	}
+
+	// Let initial sync/pre-key state settle before fetching group metadata and sending.
+	if err := sleepWithContext(ctx, connectSettleDelay); err != nil {
 		return nil, err
 	}
 
@@ -249,7 +330,7 @@ func (s *Store) SendGroupMessages(ctx context.Context, groupJIDStrs []string, te
 		groupInfo, err := s.client.GetGroupInfo(infoCtx, jid)
 		cancelInfo()
 		if err != nil {
-			return responses, fmt.Errorf("verify group %s: %w", jid.String(), err)
+			return responses, fmt.Errorf("verify target group: %w", err)
 		}
 		if groupInfo.IsAnnounce && !isSelfAdmin(s.client.Store.ID, s.client.Store.LID, groupInfo.Participants) {
 			return responses, fmt.Errorf("group %q is announcement-only (admins only) and this account is not an admin", groupInfo.Name)
@@ -263,10 +344,40 @@ func (s *Store) SendGroupMessages(ctx context.Context, groupJIDStrs []string, te
 		if err != nil {
 			return responses, fmt.Errorf("send message to group %q: %w", groupInfo.Name, err)
 		}
+
+		s.sentMu.Lock()
+		s.sentMsgs[resp.ID] = msgText
+		s.sentMu.Unlock()
+
 		responses = append(responses, resp)
-		time.Sleep(flushDelay)
+		if err := sleepWithContext(ctx, flushDelay); err != nil {
+			return responses, err
+		}
+	}
+
+	if retryWait > 0 {
+		if err := sleepWithContext(ctx, retryWait); err != nil {
+			return responses, err
+		}
+	}
+	if n := retryCount.Load(); n > 0 {
+		fmt.Printf("Fulfilled %d live retry receipt(s)\n", n)
 	}
 	return responses, nil
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func isSelfAdmin(selfID *types.JID, selfLID types.JID, participants []types.GroupParticipant) bool {

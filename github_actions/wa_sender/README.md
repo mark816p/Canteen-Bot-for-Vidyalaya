@@ -4,7 +4,8 @@ This folder contains the encrypted-session sender merged from `WhatsApp-Group-No
 It supports local `pair`, `compact`, `groups`, and group-only `send` commands.
 
 - `send` accepts `WA_GROUP_JIDS` as a comma- or newline-separated list (or `WA_GROUP_JID` for a single group), so one run can target multiple groups over one connection.
-- CI reconstructs the encrypted session from `WA_SESSION_ENC`, or from numbered variables (`WA_SESSION_ENC_PART001` through `WA_SESSION_ENC_PART005`, sorted and concatenated).
+- On `send`, stale ephemeral Signal sessions (`whatsmeow_sessions`) and group sender keys (`whatsmeow_sender_keys`) are purged before connecting (preserving `whatsmeow_device` and `whatsmeow_identity_keys`), and the client stays connected for `--retry-wait` (default `90s`, or `WA_RETRY_WAIT`) to answer live retry receipts and prevent `"Waiting for this message"` loops.
+- CI reconstructs the encrypted session from `WA_SESSION_ENC`, or from numbered variables (`WA_SESSION_ENC_PART001` through `WA_SESSION_ENC_PART005`, sorted and concatenated), unsets secret env vars once read, and shreds temporary files on exit.
 - Pairing is blocked in CI, and the session database is encrypted with AES-256-GCM at rest.
 
 ## Pair via QR code & export GitHub secret `.txt` files
