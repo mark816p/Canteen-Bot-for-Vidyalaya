@@ -57,7 +57,7 @@ func TestOpenWithOptionsPurgesOnlyEphemeralKeysAndWiresRetry(t *testing.T) {
 
 	// Populate identity_keys (must be preserved) plus sessions and sender_keys (must be purged).
 	seedStmts := []string{
-		`INSERT INTO whatsmeow_identity_keys (our_jid, their_id, identity) VALUES (?, 'peer@s.whatsapp.net', X'AA')`,
+		`INSERT INTO whatsmeow_identity_keys (our_jid, their_id, identity) VALUES (?, 'peer@s.whatsapp.net', randomblob(32))`,
 		`INSERT INTO whatsmeow_sessions (our_jid, their_id, session) VALUES (?, 'peer@s.whatsapp.net', X'BB')`,
 		`INSERT INTO whatsmeow_sender_keys (our_jid, chat_id, sender_id, sender_key) VALUES (?, '120363012345678901@g.us', 'peer@s.whatsapp.net', X'CC')`,
 	}
