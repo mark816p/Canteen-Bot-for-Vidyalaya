@@ -71,11 +71,11 @@ jobs:
           name: canteen-message
           path: github_actions
 
-      - name: Wait until 7:00 PM IST if in 6:57-7:00 PM window
+      - name: Wait until 7:00 PM IST if in 6:55-7:00 PM window
         run: |
           now_epoch=$(TZ="Asia/Kolkata" date +%s)
           hm=$(TZ="Asia/Kolkata" date +%H%M)
-          if [ "$hm" -ge 1857 ] && [ "$hm" -lt 1900 ]; then
+          if [ "$hm" -ge 1855 ] && [ "$hm" -lt 1900 ]; then
             target_epoch=$(TZ="Asia/Kolkata" date -d "today 19:00:00" +%s)
             wait_sec=$((target_epoch - now_epoch))
             if [ "$wait_sec" -gt 0 ]; then
@@ -83,7 +83,7 @@ jobs:
               sleep "$wait_sec"
             fi
           else
-            echo "Current IST time outside 18:57-19:00 window; sending immediately."
+            echo "Current IST time outside 18:55-19:00 window; sending immediately."
           fi
 
       - name: Send menu to WhatsApp groups
