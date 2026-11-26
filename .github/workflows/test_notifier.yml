@@ -35,7 +35,7 @@ jobs:
         with:
           go-version: '1.26'
 
-      - name: Send menu to Savya groups
+      - name: Send menu to Savya group
         if: ${{ hashFiles('github_actions/message_to_send.txt') != '' }}
         working-directory: github_actions/wa_sender
         env:
@@ -45,8 +45,7 @@ jobs:
           WA_SESSION_ENC_PART003: ${{ secrets.WA_SESSION_ENC_PART003 }}
           WA_SESSION_ENC_PART004: ${{ secrets.WA_SESSION_ENC_PART004 }}
           WA_SESSION_ENC_PART005: ${{ secrets.WA_SESSION_ENC_PART005 }}
-          # Savya-only test destination. The daily workflow uses the two-group secret.
-          WA_GROUP_JIDS: 120363370008112217@g.us
+          WA_GROUP_JIDS: ${{ secrets.WA_GROUP_JID_SAVYA }}
         run: go run ./cmd/notifier send --session-enc /tmp/canteen-session.db.enc --message-file ../message_to_send.txt
 
       - name: Run sender unit tests
